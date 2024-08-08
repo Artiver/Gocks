@@ -16,27 +16,27 @@ const connectMethod = "CONNECT"
 
 var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
 
-func Run(ip string, port uint16, username, password string) {
-	formatInfo := utils.FormatAddress(ip, port)
-
-	l, err := net.Listen("tcp", formatInfo)
+func Run() {
+	listen, err := net.Listen("tcp", utils.Config.CombineIpPort)
 	if err != nil {
+		log.Println("Error listening:", err)
 		log.Panic(err)
 	}
+	defer listen.Close()
 
-	log.Println("HTTP proxy listening", formatInfo)
+	log.Println("HTTP proxy listening", utils.Config.CombineIpPort)
 
 	for {
-		client, err := l.Accept()
+		conn, err := listen.Accept()
 		if err != nil {
 			log.Panic(err)
 		}
 
-		go handleClientRequest(client)
+		go HandleHTTPConnection(conn)
 	}
 }
 
-func handleClientRequest(client net.Conn) {
+func HandleHTTPConnection(client net.Conn) {
 	if client == nil {
 		return
 	}
@@ -49,9 +49,14 @@ func handleClientRequest(client net.Conn) {
 		return
 	}
 
-	var method, host string
-	firstLine := string(b[:bytes.IndexByte(b, cr)])
+	index := bytes.IndexByte(b, cr)
+	if index == -1 {
+		log.Println("not http proxy request")
+		return
+	}
+	firstLine := string(b[:index])
 
+	var method, host string
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
 	hostPortURL, err := url.Parse(host)
 	if err != nil {

@@ -8,11 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 )
-
-var config utils.Config
-var authRequired bool
 
 var chooseAuthMethod = []byte{0x05, 0x02}
 var authFailed = []byte{0x01, 0x01}
@@ -21,42 +17,27 @@ var authNeedNot = []byte{0x05, 0x00}
 var dealFailed = []byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
 var dealSuccess = []byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
 
-func Run(ip string, port uint16, username, password string) {
-	config = utils.Config{
-		Username:  username,
-		Password:  password,
-		IpAddress: ip,
-		Port:      port,
-	}
-
-	formatInfo := utils.FormatAddress(config.IpAddress, config.Port)
-
-	if config.Username != "" && config.Password != "" {
-		authRequired = true
-	} else {
-		authRequired = false
-	}
-
-	listener, err := net.Listen("tcp", formatInfo)
+func Run() {
+	listen, err := net.Listen("tcp", utils.Config.CombineIpPort)
 	if err != nil {
 		log.Println("Error listening:", err)
-		os.Exit(1)
+		log.Panic(err)
 	}
-	defer listener.Close()
+	defer listen.Close()
 
-	log.Println("SOCKS5 proxy listening", formatInfo)
+	log.Println("SOCKS5 proxy listening", utils.Config.CombineIpPort)
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := listen.Accept()
 		if err != nil {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go handleConnection(conn)
+		go HandleSocks5Connection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func HandleSocks5Connection(conn net.Conn) {
 	defer conn.Close()
 
 	if err := socks5Handshake(conn); err != nil {
@@ -81,7 +62,7 @@ func socks5Handshake(conn net.Conn) error {
 		return errors.New("unsupported SOCKS version")
 	}
 
-	if authRequired {
+	if utils.AuthRequired {
 		conn.Write(chooseAuthMethod) // 选择用户名密码认证方法
 
 		// 用户名密码认证
@@ -100,7 +81,7 @@ func socks5Handshake(conn net.Conn) error {
 		plen := int(buf[2+ulen])
 		password := string(buf[3+ulen : 3+ulen+plen])
 
-		if username != config.Username || password != config.Password {
+		if username != utils.Config.Username || password != utils.Config.Password {
 			conn.Write(authFailed) // 认证失败
 			return errors.New("authentication failed")
 		}

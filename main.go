@@ -2,7 +2,9 @@ package main
 
 import (
 	"Gocks/http"
+	"Gocks/mix"
 	"Gocks/socks5"
+	"Gocks/utils"
 	"flag"
 	"log"
 )
@@ -25,10 +27,13 @@ func init() {
 }
 
 func main() {
+	utils.SetBaseInfo(Host, uint16(Port), Username, Password)
 	switch Server {
 	case "socks5":
-		socks5.Run(Host, uint16(Port), Username, Password)
+		socks5.Run()
 	case "http":
-		http.Run(Host, uint16(Port), Username, Password)
+		http.Run()
+	case "mix":
+		mix.Run()
 	}
 }
