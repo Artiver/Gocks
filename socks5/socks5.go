@@ -1,0 +1,170 @@
+package socks5
+
+import (
+	"Gocks/utils"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+)
+
+var config utils.Config
+var authRequired bool
+
+var chooseAuthMethod = []byte{0x05, 0x02}
+var authFailed = []byte{0x01, 0x01}
+var authSuccess = []byte{0x01, 0x00}
+var authNeedNot = []byte{0x05, 0x00}
+var dealFailed = []byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+var dealSuccess = []byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+
+func Run(ip string, port uint16, username, password string) {
+	config = utils.Config{
+		Username:  username,
+		Password:  password,
+		IpAddress: ip,
+		Port:      port,
+	}
+
+	formatInfo := utils.FormatAddress(config.IpAddress, config.Port)
+
+	if config.Username != "" && config.Password != "" {
+		authRequired = true
+	} else {
+		authRequired = false
+	}
+
+	listener, err := net.Listen("tcp", formatInfo)
+	if err != nil {
+		log.Println("Error listening:", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+
+	log.Println("SOCKS5 proxy listening", formatInfo)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Println("Error accepting connection:", err)
+			continue
+		}
+		go handleConnection(conn)
+	}
+}
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	if err := socks5Handshake(conn); err != nil {
+		log.Println("Handshake error:", err)
+		return
+	}
+
+	if err := socks5HandleRequest(conn); err != nil {
+		log.Println("Request handling error:", err)
+	}
+}
+
+func socks5Handshake(conn net.Conn) error {
+	buf := make([]byte, 256)
+
+	n, err := conn.Read(buf)
+	if err != nil || n < 2 {
+		return errors.New("failed to read from client")
+	}
+
+	if buf[0] != 0x05 {
+		return errors.New("unsupported SOCKS version")
+	}
+
+	if authRequired {
+		conn.Write(chooseAuthMethod) // 选择用户名密码认证方法
+
+		// 用户名密码认证
+		n, err = conn.Read(buf)
+		if err != nil || n < 2 {
+			return errors.New("failed to read authentication request")
+		}
+
+		if buf[0] != 0x01 {
+			return errors.New("unsupported auth version")
+		}
+
+		ulen := int(buf[1])
+		username := string(buf[2 : 2+ulen])
+
+		plen := int(buf[2+ulen])
+		password := string(buf[3+ulen : 3+ulen+plen])
+
+		if username != config.Username || password != config.Password {
+			conn.Write(authFailed) // 认证失败
+			return errors.New("authentication failed")
+		}
+
+		conn.Write(authSuccess) // 认证成功
+	} else {
+		conn.Write(authNeedNot) // 无需认证
+	}
+
+	return nil
+}
+
+func socks5HandleRequest(conn net.Conn) error {
+	buf := make([]byte, 256)
+
+	// 读取客户端请求
+	n, err := conn.Read(buf)
+	if err != nil || n < 7 {
+		return errors.New("failed to read request")
+	}
+
+	if buf[0] != 0x05 {
+		return errors.New("unsupported SOCKS version")
+	}
+
+	cmd := buf[1]
+	addrType := buf[3]
+	var addr string
+	var port uint16
+
+	switch addrType {
+	case 0x01: // IPv4
+		addr = net.IP(buf[4:8]).String()
+		port = binary.BigEndian.Uint16(buf[8:10])
+	case 0x03: // 域名
+		addrLen := buf[4]
+		addr = string(buf[5 : 5+addrLen])
+		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
+	case 0x04: // IPv6
+		addr = net.IP(buf[4:20]).String()
+		port = binary.BigEndian.Uint16(buf[20:22])
+	default:
+		return errors.New("unsupported address type")
+	}
+
+	if cmd != 0x01 {
+		return errors.New("unsupported command")
+	}
+
+	// 获取客户端的IP地址
+	clientAddr := conn.RemoteAddr().String()
+	log.Printf("%s <--> %s:%d", clientAddr, addr, port)
+
+	targetConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+	if err != nil {
+		conn.Write(dealFailed)
+		return errors.New("dial tcp " + utils.FormatAddress(addr, port))
+	}
+	defer targetConn.Close()
+
+	conn.Write(dealSuccess)
+
+	go io.Copy(targetConn, conn)
+	io.Copy(conn, targetConn)
+
+	return nil
+}
