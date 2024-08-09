@@ -29,24 +29,25 @@ func Run() {
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
-			log.Panic(err)
+			log.Println("Error accepting connection:", err)
+			continue
 		}
 
 		go HandleHTTPConnection(conn, nil)
 	}
 }
 
-func HandleHTTPConnection(client net.Conn, firstBuff []byte) {
-	if client == nil {
+func HandleHTTPConnection(conn net.Conn, firstBuff []byte) {
+	if conn == nil {
 		return
 	}
-	defer client.Close()
+	defer conn.Close()
 
 	if firstBuff == nil {
 		firstBuff = make([]byte, 512)
-		_, err := client.Read(firstBuff)
+		_, err := conn.Read(firstBuff)
 		if err != nil {
-			log.Println("read client data error")
+			log.Println("read conn data error")
 			return
 		}
 	}
@@ -62,7 +63,7 @@ func HandleHTTPConnection(client net.Conn, firstBuff []byte) {
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
 	hostPortURL, err := url.Parse(host)
 	if err != nil {
-		log.Println("parse client url error")
+		log.Println("parse conn url error")
 		return
 	}
 
@@ -80,7 +81,7 @@ func HandleHTTPConnection(client net.Conn, firstBuff []byte) {
 		}
 	}
 
-	clientAddr := client.RemoteAddr().String()
+	clientAddr := conn.RemoteAddr().String()
 	log.Printf("%s <--> %s", clientAddr, firstLine)
 
 	server, err := net.Dial("tcp", address)
@@ -90,11 +91,11 @@ func HandleHTTPConnection(client net.Conn, firstBuff []byte) {
 	}
 
 	if method == connectMethod {
-		client.Write(connectResponse)
+		conn.Write(connectResponse)
 	} else {
 		server.Write(firstBuff)
 	}
 
-	go io.Copy(server, client)
-	io.Copy(client, server)
+	go io.Copy(server, conn)
+	io.Copy(conn, server)
 }

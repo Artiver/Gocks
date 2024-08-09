@@ -6,14 +6,13 @@ import (
 	"Gocks/utils"
 	"log"
 	"net"
-	"os"
 )
 
 func Run() {
 	listen, err := net.Listen("tcp", utils.Config.CombineIpPort)
 	if err != nil {
 		log.Println("Error listening:", err)
-		os.Exit(1)
+		log.Panic(err)
 	}
 	defer listen.Close()
 
