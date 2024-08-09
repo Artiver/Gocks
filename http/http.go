@@ -32,29 +32,31 @@ func Run() {
 			log.Panic(err)
 		}
 
-		go HandleHTTPConnection(conn)
+		go HandleHTTPConnection(conn, nil)
 	}
 }
 
-func HandleHTTPConnection(client net.Conn) {
+func HandleHTTPConnection(client net.Conn, firstBuff []byte) {
 	if client == nil {
 		return
 	}
 	defer client.Close()
 
-	b := make([]byte, 1024)
-	_, err := client.Read(b)
-	if err != nil {
-		log.Println("read client data error")
-		return
+	if firstBuff == nil {
+		firstBuff = make([]byte, 512)
+		_, err := client.Read(firstBuff)
+		if err != nil {
+			log.Println("read client data error")
+			return
+		}
 	}
 
-	index := bytes.IndexByte(b, cr)
+	index := bytes.IndexByte(firstBuff, cr)
 	if index == -1 {
 		log.Println("not http proxy request")
 		return
 	}
-	firstLine := string(b[:index])
+	firstLine := string(firstBuff[:index])
 
 	var method, host string
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
@@ -90,7 +92,7 @@ func HandleHTTPConnection(client net.Conn) {
 	if method == connectMethod {
 		client.Write(connectResponse)
 	} else {
-		server.Write(b)
+		server.Write(firstBuff)
 	}
 
 	go io.Copy(server, client)

@@ -33,14 +33,14 @@ func Run() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go HandleSocks5Connection(conn)
+		go HandleSocks5Connection(conn, nil)
 	}
 }
 
-func HandleSocks5Connection(conn net.Conn) {
+func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
 	defer conn.Close()
 
-	if err := socks5Handshake(conn); err != nil {
+	if err := socks5Handshake(conn, firstBuff); err != nil {
 		log.Println("Handshake error:", err)
 		return
 	}
@@ -50,36 +50,37 @@ func HandleSocks5Connection(conn net.Conn) {
 	}
 }
 
-func socks5Handshake(conn net.Conn) error {
-	buf := make([]byte, 256)
-
-	n, err := conn.Read(buf)
-	if err != nil || n < 2 {
-		return errors.New("failed to read from client")
-	}
-
-	if buf[0] != 0x05 {
-		return errors.New("unsupported SOCKS version")
+func socks5Handshake(conn net.Conn, firstBuff []byte) error {
+	if firstBuff == nil {
+		firstBuff = make([]byte, 256)
+		n, err := conn.Read(firstBuff)
+		if err != nil || n < 2 {
+			return errors.New("failed to read from client")
+		}
+		if firstBuff[0] != 0x05 {
+			return errors.New("unsupported SOCKS version")
+		}
 	}
 
 	if utils.AuthRequired {
-		conn.Write(chooseAuthMethod) // 选择用户名密码认证方法
+		// 通知客户端使用用户密码认证
+		conn.Write(chooseAuthMethod)
 
 		// 用户名密码认证
-		n, err = conn.Read(buf)
+		n, err := conn.Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read authentication request")
 		}
 
-		if buf[0] != 0x01 {
+		if firstBuff[0] != 0x01 {
 			return errors.New("unsupported auth version")
 		}
 
-		ulen := int(buf[1])
-		username := string(buf[2 : 2+ulen])
+		ulen := int(firstBuff[1])
+		username := string(firstBuff[2 : 2+ulen])
 
-		plen := int(buf[2+ulen])
-		password := string(buf[3+ulen : 3+ulen+plen])
+		plen := int(firstBuff[2+ulen])
+		password := string(firstBuff[3+ulen : 3+ulen+plen])
 
 		if username != utils.Config.Username || password != utils.Config.Password {
 			conn.Write(authFailed) // 认证失败

@@ -16,7 +16,7 @@ var Host string
 var Port uint
 
 func init() {
-	flag.StringVar(&Server, "type", "socks5", "server type, [socks5, http]")
+	flag.StringVar(&Server, "type", "mix", "server type, [socks5, http, mix]")
 	flag.StringVar(&Username, "user", "", "Username for proxy auth")
 	flag.StringVar(&Password, "pass", "", "Password for proxy auth")
 	flag.StringVar(&Host, "host", "", "Host for proxy")

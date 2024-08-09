@@ -30,7 +30,7 @@ func Run() {
 }
 
 func chooseProxy(conn net.Conn) {
-	buff := make([]byte, 1)
+	buff := make([]byte, 512)
 	if _, err := conn.Read(buff); err != nil {
 		log.Printf("Error reading from connection: %v", err)
 		return
@@ -38,8 +38,8 @@ func chooseProxy(conn net.Conn) {
 
 	switch buff[0] {
 	case 0x05:
-		socks5.HandleSocks5Connection(conn)
+		go socks5.HandleSocks5Connection(conn, buff)
 	default:
-		http.HandleHTTPConnection(conn)
+		go http.HandleHTTPConnection(conn, buff)
 	}
 }
