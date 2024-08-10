@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Configure struct {
@@ -16,11 +17,21 @@ type Configure struct {
 var Config Configure
 var AuthRequired bool
 
+const TcpConnectTimeout = 5 * time.Second
+
 func FormatAddress(ip string, port uint16) string {
 	if strings.Contains(ip, ":") {
 		return fmt.Sprintf("[%s]:%d", ip, port)
 	} else {
 		return fmt.Sprintf("%s:%d", ip, port)
+	}
+}
+
+func FormatAddressStr(ip, port string) string {
+	if strings.Contains(ip, ":") {
+		return fmt.Sprintf("[%s]:%s", ip, port)
+	} else {
+		return fmt.Sprintf("%s:%s", ip, port)
 	}
 }
 

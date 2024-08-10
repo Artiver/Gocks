@@ -132,7 +132,7 @@ func socks5HandleRequest(conn *net.Conn) error {
 		return errors.New("unsupported command")
 	}
 
-	targetConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+	targetConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", addr, port), utils.TcpConnectTimeout)
 	if err != nil {
 		(*conn).Write(dealFailed)
 		return errors.New("dial tcp " + utils.FormatAddress(addr, port))
