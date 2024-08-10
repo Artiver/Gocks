@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/url"
-	"strings"
 )
 
 const cr = byte('\r')
@@ -61,34 +59,15 @@ func HandleHTTPConnection(conn net.Conn, firstBuff []byte) {
 
 	var method, host string
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
-	hostPortURL, err := url.Parse(host)
-	if err != nil {
-		log.Println("parse conn url error")
-		return
-	}
 
-	var address string
-	if hostPortURL.Opaque == "443" {
-		//https访问
-		address = hostPortURL.Scheme + ":443"
-	} else {
-		//http访问
-		if strings.Index(hostPortURL.Host, ":") == -1 {
-			//host不带端口， 默认80
-			address = hostPortURL.Host + ":80"
-		} else {
-			address = hostPortURL.Host
-		}
+	server, err := net.Dial("tcp", host)
+	if err != nil {
+		log.Println("dial tcp error " + host)
+		return
 	}
 
 	clientAddr := conn.RemoteAddr().String()
 	log.Printf("%s <--> %s", clientAddr, firstLine)
-
-	server, err := net.Dial("tcp", address)
-	if err != nil {
-		log.Println("dial tcp error " + address)
-		return
-	}
 
 	if method == connectMethod {
 		conn.Write(connectResponse)
