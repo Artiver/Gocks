@@ -61,20 +61,28 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	var method, host string
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
 
-	hostPortURL, err := url.Parse(host)
+	urlParse, err := url.Parse(host)
 	if err != nil {
 		log.Println("parse url error", host)
 		return
 	}
 
-	server, err := net.Dial("tcp", hostPortURL.Host)
+	var proxyUrl string
+
+	if method == connectMethod {
+		proxyUrl = host
+	} else {
+		proxyUrl = utils.FormatAddressStr(urlParse.Scheme, urlParse.Opaque)
+	}
+
+	server, err := net.DialTimeout("tcp", proxyUrl, utils.TcpConnectTimeout)
 	if err != nil {
-		log.Println("dial tcp error", hostPortURL.Host)
+		log.Println("dial tcp error", host)
 		return
 	}
 
 	clientAddr := (*conn).RemoteAddr().String()
-	log.Printf("[HTTP] %s <--> %s", clientAddr, hostPortURL.Host)
+	log.Printf("[HTTP] %s <--> %s", clientAddr, proxyUrl)
 
 	if method == connectMethod {
 		(*conn).Write(connectResponse)
