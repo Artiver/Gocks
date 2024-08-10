@@ -24,13 +24,13 @@ func Run() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go chooseProxy(conn)
+		go chooseProxy(&conn)
 	}
 }
 
-func chooseProxy(conn net.Conn) {
+func chooseProxy(conn *net.Conn) {
 	buff := make([]byte, 512)
-	if _, err := conn.Read(buff); err != nil {
+	if _, err := (*conn).Read(buff); err != nil {
 		log.Printf("Error reading from connection: %v", err)
 		return
 	}

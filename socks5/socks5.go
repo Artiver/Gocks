@@ -33,12 +33,12 @@ func Run() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go HandleSocks5Connection(conn, nil)
+		go HandleSocks5Connection(&conn, nil)
 	}
 }
 
-func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
-	defer conn.Close()
+func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
+	defer (*conn).Close()
 
 	if err := socks5Handshake(conn, firstBuff); err != nil {
 		log.Println("Handshake error:", err)
@@ -50,10 +50,10 @@ func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
 	}
 }
 
-func socks5Handshake(conn net.Conn, firstBuff []byte) error {
+func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	if firstBuff == nil {
 		firstBuff = make([]byte, 256)
-		n, err := conn.Read(firstBuff)
+		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
 		}
@@ -64,10 +64,10 @@ func socks5Handshake(conn net.Conn, firstBuff []byte) error {
 
 	if utils.AuthRequired {
 		// 通知客户端使用用户密码认证
-		conn.Write(chooseAuthMethod)
+		(*conn).Write(chooseAuthMethod)
 
 		// 用户名密码认证
-		n, err := conn.Read(firstBuff)
+		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read authentication request")
 		}
@@ -83,23 +83,23 @@ func socks5Handshake(conn net.Conn, firstBuff []byte) error {
 		password := string(firstBuff[3+ulen : 3+ulen+plen])
 
 		if username != utils.Config.Username || password != utils.Config.Password {
-			conn.Write(authFailed) // 认证失败
+			(*conn).Write(authFailed) // 认证失败
 			return errors.New("authentication failed")
 		}
 
-		conn.Write(authSuccess) // 认证成功
+		(*conn).Write(authSuccess) // 认证成功
 	} else {
-		conn.Write(authNeedNot) // 无需认证
+		(*conn).Write(authNeedNot) // 无需认证
 	}
 
 	return nil
 }
 
-func socks5HandleRequest(conn net.Conn) error {
+func socks5HandleRequest(conn *net.Conn) error {
 	buf := make([]byte, 256)
 
 	// 读取客户端请求
-	n, err := conn.Read(buf)
+	n, err := (*conn).Read(buf)
 	if err != nil || n < 7 {
 		return errors.New("failed to read request")
 	}
@@ -132,21 +132,20 @@ func socks5HandleRequest(conn net.Conn) error {
 		return errors.New("unsupported command")
 	}
 
-	// 获取客户端的IP地址
-	clientAddr := conn.RemoteAddr().String()
-	log.Printf("%s <--> %s:%d", clientAddr, addr, port)
-
 	targetConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
 	if err != nil {
-		conn.Write(dealFailed)
+		(*conn).Write(dealFailed)
 		return errors.New("dial tcp " + utils.FormatAddress(addr, port))
 	}
 	defer targetConn.Close()
 
-	conn.Write(dealSuccess)
+	clientAddr := (*conn).RemoteAddr().String()
+	log.Printf("[SOCKS5] %s <--> %s:%d", clientAddr, addr, port)
 
-	go io.Copy(targetConn, conn)
-	io.Copy(conn, targetConn)
+	(*conn).Write(dealSuccess)
+
+	go io.Copy(targetConn, *conn)
+	io.Copy(*conn, targetConn)
 
 	return nil
 }
