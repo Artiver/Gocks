@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 )
 
 const cr = byte('\r')
@@ -60,14 +61,20 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	var method, host string
 	fmt.Sscanf(firstLine, "%s %s", &method, &host)
 
-	server, err := net.Dial("tcp", host)
+	hostPortURL, err := url.Parse(host)
 	if err != nil {
-		log.Println("dial tcp error " + host)
+		log.Println("parse url error", host)
+		return
+	}
+
+	server, err := net.Dial("tcp", hostPortURL.Host)
+	if err != nil {
+		log.Println("dial tcp error", hostPortURL.Host)
 		return
 	}
 
 	clientAddr := (*conn).RemoteAddr().String()
-	log.Printf("[HTTP] %s <--> %s", clientAddr, firstLine)
+	log.Printf("[HTTP] %s <--> %s", clientAddr, hostPortURL.Host)
 
 	if method == connectMethod {
 		(*conn).Write(connectResponse)
