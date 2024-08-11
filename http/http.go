@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"strings"
 )
 
 const cr = byte('\r')
@@ -46,7 +47,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		firstBuff = make([]byte, 512)
 		_, err := (*conn).Read(firstBuff)
 		if err != nil {
-			log.Println("read conn data error")
+			log.Println("read http data error")
 			return
 		}
 	}
@@ -58,33 +59,38 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}
 	firstLine := string(firstBuff[:index])
 
-	var method, host string
-	fmt.Sscanf(firstLine, "%s %s", &method, &host)
+	var method, rawUrl string
+	fmt.Sscanf(firstLine, "%s %s", &method, &rawUrl)
 
-	urlParse, err := url.Parse(host)
+	justHttpsProxy := method == connectMethod && !strings.HasPrefix(rawUrl, "/")
+
+	if justHttpsProxy {
+		// CONNECT www.google.com:443 HTTP/1.1
+		rawUrl = "http://" + rawUrl
+	}
+
+	urlParse, err := url.Parse(rawUrl)
 	if err != nil {
-		log.Println("parse url error", host)
+		log.Println("parse url error", rawUrl)
 		return
 	}
 
-	var proxyUrl string
+	tcpAddress := urlParse.Host
 
-	if method == connectMethod {
-		proxyUrl = host
-	} else {
-		proxyUrl = utils.FormatAddressStr(urlParse.Scheme, urlParse.Opaque)
+	if urlParse.Scheme == "http" && strings.Contains(urlParse.Host, ".") && !strings.Contains(urlParse.Host, ":") {
+		tcpAddress = urlParse.Host + ":80"
 	}
 
-	server, err := net.DialTimeout("tcp", proxyUrl, utils.TcpConnectTimeout)
+	server, err := net.DialTimeout("tcp", tcpAddress, utils.TcpConnectTimeout)
 	if err != nil {
-		log.Println("dial tcp error", host)
+		log.Println(err)
 		return
 	}
 
 	clientAddr := (*conn).RemoteAddr().String()
-	log.Printf("[HTTP] %s <--> %s", clientAddr, proxyUrl)
+	log.Printf("[HTTP] %s <--> %s", clientAddr, tcpAddress)
 
-	if method == connectMethod {
+	if justHttpsProxy {
 		(*conn).Write(connectResponse)
 	} else {
 		server.Write(firstBuff)
