@@ -64,21 +64,22 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 
 	justHttpsProxy := method == connectMethod && !strings.HasPrefix(rawUrl, "/")
 
-	if justHttpsProxy {
-		// CONNECT www.google.com:443 HTTP/1.1
-		rawUrl = "http://" + rawUrl
-	}
+	// https代理 直接返回建立成功的标识
+	tcpAddress := rawUrl
 
-	urlParse, err := url.Parse(rawUrl)
-	if err != nil {
-		log.Println("parse url error", rawUrl)
-		return
-	}
+	// http代理 需要额外处理端口为80的情况
+	if !justHttpsProxy {
+		urlParse, err := url.Parse(rawUrl)
+		if err != nil {
+			log.Println("parse url error", rawUrl)
+			return
+		}
 
-	tcpAddress := urlParse.Host
+		tcpAddress = urlParse.Host
 
-	if urlParse.Scheme == "http" && strings.Contains(urlParse.Host, ".") && !strings.Contains(urlParse.Host, ":") {
-		tcpAddress = urlParse.Host + ":80"
+		if strings.Contains(urlParse.Host, ".") && !strings.Contains(urlParse.Host, ":") {
+			tcpAddress = urlParse.Host + ":80"
+		}
 	}
 
 	server, err := net.DialTimeout("tcp", tcpAddress, utils.TcpConnectTimeout)
