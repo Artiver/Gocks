@@ -44,7 +44,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	defer (*conn).Close()
 
 	if firstBuff == nil {
-		firstBuff = make([]byte, 512)
+		firstBuff = make([]byte, utils.DefaultReadBytes)
 		_, err := (*conn).Read(firstBuff)
 		if err != nil {
 			log.Println("read http data error")
@@ -60,8 +60,13 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	firstLine := string(firstBuff[:index])
 
 	var method, rawUrl string
-	fmt.Sscanf(firstLine, "%s %s", &method, &rawUrl)
+	_, err := fmt.Sscanf(firstLine, "%s %s", &method, &rawUrl)
+	if err != nil {
+		log.Println("parse http request header error", firstLine)
+		return
+	}
 
+	// CONNECT www.google.com:443 HTTP/1.1
 	justHttpsProxy := method == connectMethod && !strings.HasPrefix(rawUrl, "/")
 
 	// https代理 直接返回建立成功的标识
@@ -78,6 +83,10 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		tcpAddress = urlParse.Host
 
 		if strings.Contains(urlParse.Host, ".") && !strings.Contains(urlParse.Host, ":") {
+			// 判断ipv4地址或者域名没有默认端口
+			tcpAddress = urlParse.Host + ":80"
+		} else if strings.Contains(urlParse.Host, "[") && !strings.Contains(urlParse.Host, "]:") {
+			// 判断ipv6地址没有默认端口
 			tcpAddress = urlParse.Host + ":80"
 		}
 	}
@@ -92,11 +101,30 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	log.Printf("[HTTP] %s <--> %s", clientAddr, tcpAddress)
 
 	if justHttpsProxy {
-		(*conn).Write(connectResponse)
+		_, err = (*conn).Write(connectResponse)
+		if err != nil {
+			log.Println("Established to client error", clientAddr)
+			return
+		}
 	} else {
-		server.Write(firstBuff)
+		_, err = server.Write(firstBuff)
+		if err != nil {
+			log.Println("tcp write error", err)
+			return
+		}
 	}
 
-	go io.Copy(server, *conn)
-	io.Copy(*conn, server)
+	go func() {
+		_, err = io.Copy(server, *conn)
+		if err != nil {
+			log.Println("response to client error", clientAddr)
+			return
+		}
+	}()
+
+	_, err = io.Copy(*conn, server)
+	if err != nil {
+		log.Println("request to server error", tcpAddress)
+		return
+	}
 }
