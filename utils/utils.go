@@ -17,6 +17,8 @@ type Configure struct {
 var Config Configure
 var AuthRequired bool
 
+const Socks5HandleBytes = 256
+const DefaultReadBytes = 512
 const TcpConnectTimeout = 5 * time.Second
 
 func FormatAddress(ip string, port uint16) string {

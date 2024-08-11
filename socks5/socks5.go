@@ -52,7 +52,7 @@ func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
 
 func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	if firstBuff == nil {
-		firstBuff = make([]byte, 256)
+		firstBuff = make([]byte, utils.Socks5HandleBytes)
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
@@ -96,7 +96,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 }
 
 func socks5HandleRequest(conn *net.Conn) error {
-	buf := make([]byte, 256)
+	buf := make([]byte, utils.Socks5HandleBytes)
 
 	// 读取客户端请求
 	n, err := (*conn).Read(buf)

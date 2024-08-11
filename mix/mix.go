@@ -29,7 +29,7 @@ func Run() {
 }
 
 func chooseProxy(conn *net.Conn) {
-	buff := make([]byte, 512)
+	buff := make([]byte, utils.DefaultReadBytes)
 	if _, err := (*conn).Read(buff); err != nil {
 		log.Printf("Error reading from connection: %v", err)
 		return
