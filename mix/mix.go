@@ -14,7 +14,12 @@ func Run() {
 		log.Println("Error listening:", err)
 		log.Panic(err)
 	}
-	defer listen.Close()
+	defer func(listen net.Listener) {
+		err = listen.Close()
+		if err != nil {
+			log.Println("listening close error", err)
+		}
+	}(listen)
 
 	log.Println("MIX proxy listening", utils.Config.CombineIpPort)
 

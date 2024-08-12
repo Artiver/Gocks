@@ -22,7 +22,12 @@ func Run() {
 		log.Println("Error listening:", err)
 		log.Panic(err)
 	}
-	defer listen.Close()
+	defer func(listen net.Listener) {
+		err = listen.Close()
+		if err != nil {
+			log.Println("listening close error", err)
+		}
+	}(listen)
 
 	log.Println("HTTP proxy listening", utils.Config.CombineIpPort)
 
@@ -41,7 +46,12 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	if conn == nil {
 		return
 	}
-	defer (*conn).Close()
+	defer func(conn net.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Println("connection close error", err)
+		}
+	}(*conn)
 
 	if firstBuff == nil {
 		firstBuff = make([]byte, utils.DefaultReadBytes)
@@ -96,6 +106,12 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		log.Println(err)
 		return
 	}
+	defer func(server net.Conn) {
+		err = server.Close()
+		if err != nil {
+			log.Println("tcp transport close error", err)
+		}
+	}(server)
 
 	clientAddr := (*conn).RemoteAddr().String()
 	log.Printf("[HTTP] %s <--> %s", clientAddr, tcpAddress)

@@ -23,7 +23,12 @@ func Run() {
 		log.Println("Error listening:", err)
 		log.Panic(err)
 	}
-	defer listen.Close()
+	defer func(listen net.Listener) {
+		err = listen.Close()
+		if err != nil {
+			log.Println("listening close error", err)
+		}
+	}(listen)
 
 	log.Println("SOCKS5 proxy listening", utils.Config.CombineIpPort)
 
@@ -38,7 +43,12 @@ func Run() {
 }
 
 func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
-	defer (*conn).Close()
+	defer func(conn net.Conn) {
+		err := conn.Close()
+		if err != nil {
+			log.Println("connection close error", err)
+		}
+	}(*conn)
 
 	if err := socks5Handshake(conn, firstBuff); err != nil {
 		log.Println("Handshake error:", err)
@@ -64,7 +74,10 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 
 	if utils.AuthRequired {
 		// 通知客户端使用用户密码认证
-		(*conn).Write(chooseAuthMethod)
+		_, err := (*conn).Write(chooseAuthMethod)
+		if err != nil {
+			return err
+		}
 
 		// 用户名密码认证
 		n, err := (*conn).Read(firstBuff)
@@ -76,20 +89,29 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 			return errors.New("unsupported auth version")
 		}
 
-		ulen := int(firstBuff[1])
-		username := string(firstBuff[2 : 2+ulen])
+		usernameLen := int(firstBuff[1])
+		username := string(firstBuff[2 : 2+usernameLen])
 
-		plen := int(firstBuff[2+ulen])
-		password := string(firstBuff[3+ulen : 3+ulen+plen])
+		passwordLen := int(firstBuff[2+usernameLen])
+		password := string(firstBuff[3+usernameLen : 3+usernameLen+passwordLen])
 
 		if username != utils.Config.Username || password != utils.Config.Password {
-			(*conn).Write(authFailed) // 认证失败
-			return errors.New("authentication failed")
+			_, err = (*conn).Write(authFailed)
+			if err != nil {
+				return err
+			}
+			return errors.New("authentication failed") // 认证失败
 		}
 
-		(*conn).Write(authSuccess) // 认证成功
+		_, err = (*conn).Write(authSuccess) // 认证成功
+		if err != nil {
+			return err
+		}
 	} else {
-		(*conn).Write(authNeedNot) // 无需认证
+		_, err := (*conn).Write(authNeedNot) // 无需认证
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -134,18 +156,39 @@ func socks5HandleRequest(conn *net.Conn) error {
 
 	targetConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", addr, port), utils.TcpConnectTimeout)
 	if err != nil {
-		(*conn).Write(dealFailed)
+		_, err = (*conn).Write(dealFailed)
+		if err != nil {
+			return err
+		}
 		return errors.New("dial tcp " + utils.FormatAddress(addr, port))
 	}
-	defer targetConn.Close()
+	defer func(targetConn net.Conn) {
+		err = targetConn.Close()
+		if err != nil {
+			log.Println("target connection close error", err)
+		}
+	}(targetConn)
 
 	clientAddr := (*conn).RemoteAddr().String()
 	log.Printf("[SOCKS5] %s <--> %s:%d", clientAddr, addr, port)
 
-	(*conn).Write(dealSuccess)
+	_, err = (*conn).Write(dealSuccess)
+	if err != nil {
+		return err
+	}
 
-	go io.Copy(targetConn, *conn)
-	io.Copy(*conn, targetConn)
+	go func() {
+		_, err = io.Copy(targetConn, *conn)
+		if err != nil {
+			log.Println("response to client error", clientAddr)
+		}
+	}()
+
+	_, err = io.Copy(*conn, targetConn)
+	if err != nil {
+		log.Println("request to server error", clientAddr)
+		return err
+	}
 
 	return nil
 }
