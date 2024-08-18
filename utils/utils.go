@@ -29,14 +29,6 @@ func FormatAddress(ip string, port uint16) string {
 	}
 }
 
-func FormatAddressStr(ip, port string) string {
-	if strings.Contains(ip, ":") {
-		return fmt.Sprintf("[%s]:%s", ip, port)
-	} else {
-		return fmt.Sprintf("%s:%s", ip, port)
-	}
-}
-
 func SetBaseInfo(ip string, port uint16, username, password string) {
 	Config = Configure{
 		Username:      username,

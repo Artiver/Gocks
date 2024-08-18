@@ -4,18 +4,25 @@ import (
 	"Gocks/utils"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
 )
 
-var chooseAuthMethod = []byte{0x05, 0x02}
+var authNone = []byte{socksVersion, 0x00}
+var authUsernamePassword = []byte{socksVersion, 0x02}
 var authFailed = []byte{0x01, 0x01}
 var authSuccess = []byte{0x01, 0x00}
-var authNeedNot = []byte{0x05, 0x00}
-var dealFailed = []byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
-var dealSuccess = []byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+var connectFailed = []byte{socksVersion, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+var connectSuccess = []byte{socksVersion, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+
+const socksVersion = 0x05
+const cmdConnect = 0x01
+const cmdBind = 0x02
+const cmdUDP = 0x03
+const addrIPv4 = 0x01
+const addrIPv6 = 0x04
+const addrDomain = 0x03
 
 func Run() {
 	listen, err := net.Listen("tcp", utils.Config.CombineIpPort)
@@ -63,23 +70,42 @@ func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
 func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	if firstBuff == nil {
 		firstBuff = make([]byte, utils.Socks5HandleBytes)
+		// The client connects to the server, and sends a version identifier/method selection message:
+		//
+		//     +----+----------+----------+
+		//     |VER | NMETHODS | METHODS  |
+		//     +----+----------+----------+
+		//     | 1  |    1     | 1 to 255 |
+		//     +----+----------+----------+
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
 		}
-		if firstBuff[0] != 0x05 {
+		if firstBuff[0] != socksVersion {
 			return errors.New("unsupported SOCKS version")
 		}
 	}
-
+	// The server selects from one of the methods given in METHODS, and sends a METHOD selection message:
+	//
+	//     +----+--------+
+	//     |VER | METHOD |
+	//     +----+--------+
+	//     | 1  |   1    |
+	//     +----+--------+
 	if utils.AuthRequired {
 		// 通知客户端使用用户密码认证
-		_, err := (*conn).Write(chooseAuthMethod)
+		_, err := (*conn).Write(authUsernamePassword)
 		if err != nil {
 			return err
 		}
 
-		// 用户名密码认证
+		// This begins with the client producing a Username/Password request:
+		//
+		// +----+------+----------+------+----------+
+		// |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+		// +----+------+----------+------+----------+
+		// | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+		// +----+------+----------+------+----------+
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read authentication request")
@@ -95,12 +121,19 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		passwordLen := int(firstBuff[2+usernameLen])
 		password := string(firstBuff[3+usernameLen : 3+usernameLen+passwordLen])
 
+		// The server verifies the supplied UNAME and PASSWD, and sends the following response:
+		//
+		// +----+--------+
+		// |VER | STATUS |
+		// +----+--------+
+		// | 1  |   1    |
+		// +----+--------+
 		if username != utils.Config.Username || password != utils.Config.Password {
-			_, err = (*conn).Write(authFailed)
+			_, err = (*conn).Write(authFailed) // 认证失败
 			if err != nil {
 				return err
 			}
-			return errors.New("authentication failed") // 认证失败
+			return errors.New("authentication failed")
 		}
 
 		_, err = (*conn).Write(authSuccess) // 认证成功
@@ -108,7 +141,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 			return err
 		}
 	} else {
-		_, err := (*conn).Write(authNeedNot) // 无需认证
+		_, err := (*conn).Write(authNone) // 无需认证
 		if err != nil {
 			return err
 		}
@@ -120,47 +153,63 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 func socks5HandleRequest(conn *net.Conn) error {
 	buf := make([]byte, utils.Socks5HandleBytes)
 
-	// 读取客户端请求
+	// The SOCKS request is formed as follows:
+	//
+	// +----+-----+-------+------+----------+----------+
+	// |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+	// +----+-----+-------+------+----------+----------+
+	// | 1  |  1  | X'00' |  1   | Variable |    2     |
+	// +----+-----+-------+------+----------+----------+
 	n, err := (*conn).Read(buf)
 	if err != nil || n < 7 {
 		return errors.New("failed to read request")
 	}
 
-	if buf[0] != 0x05 {
+	if buf[0] != socksVersion {
 		return errors.New("unsupported SOCKS version")
 	}
 
 	cmd := buf[1]
+
+	switch cmd {
+	case cmdConnect:
+
+	case cmdBind:
+		return errors.New("unsupported command")
+	case cmdUDP:
+		return errors.New("unsupported command")
+	}
+
 	addrType := buf[3]
 	var addr string
 	var port uint16
 
 	switch addrType {
-	case 0x01: // IPv4
+	case addrIPv4:
 		addr = net.IP(buf[4:8]).String()
 		port = binary.BigEndian.Uint16(buf[8:10])
-	case 0x03: // 域名
+	case addrIPv6:
+		addr = net.IP(buf[4:20]).String()
+		port = binary.BigEndian.Uint16(buf[20:22])
+	case addrDomain:
 		addrLen := buf[4]
 		addr = string(buf[5 : 5+addrLen])
 		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
-	case 0x04: // IPv6
-		addr = net.IP(buf[4:20]).String()
-		port = binary.BigEndian.Uint16(buf[20:22])
 	default:
 		return errors.New("unsupported address type")
 	}
 
-	if cmd != 0x01 {
-		return errors.New("unsupported command")
-	}
+	return socks5Transport(conn, utils.FormatAddress(addr, port))
+}
 
-	targetConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", addr, port), utils.TcpConnectTimeout)
+func socks5Transport(conn *net.Conn, targetAddr string) error {
+	targetConn, err := net.DialTimeout("tcp", targetAddr, utils.TcpConnectTimeout)
 	if err != nil {
-		_, err = (*conn).Write(dealFailed)
+		_, err = (*conn).Write(connectFailed)
 		if err != nil {
 			return err
 		}
-		return errors.New("dial tcp " + utils.FormatAddress(addr, port))
+		return errors.New("dial tcp " + targetAddr)
 	}
 	defer func(targetConn net.Conn) {
 		err = targetConn.Close()
@@ -170,9 +219,9 @@ func socks5HandleRequest(conn *net.Conn) error {
 	}(targetConn)
 
 	clientAddr := (*conn).RemoteAddr().String()
-	log.Printf("[SOCKS5] %s <--> %s:%d", clientAddr, addr, port)
+	log.Printf("[SOCKS5] %s <--> %s", clientAddr, targetAddr)
 
-	_, err = (*conn).Write(dealSuccess)
+	_, err = (*conn).Write(connectSuccess)
 	if err != nil {
 		return err
 	}
