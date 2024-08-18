@@ -9,14 +9,15 @@ import (
 	"net"
 )
 
-var authNone = []byte{socksVersion, 0x00}
-var authUsernamePassword = []byte{socksVersion, 0x02}
+var authNone = []byte{socks5Version, 0x00}
+var authUsernamePassword = []byte{socks5Version, 0x02}
 var authFailed = []byte{0x01, 0x01}
 var authSuccess = []byte{0x01, 0x00}
-var connectFailed = []byte{socksVersion, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
-var connectSuccess = []byte{socksVersion, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+var connectFailed = []byte{socks5Version, 0x01, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
+var connectRefused = []byte{socks5Version, 0x05, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
+var connectSuccess = []byte{socks5Version, 0x00, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
 
-const socksVersion = 0x05
+const socks5Version = 0x05
 const cmdConnect = 0x01
 const cmdBind = 0x02
 const cmdUDP = 0x03
@@ -81,7 +82,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
 		}
-		if firstBuff[0] != socksVersion {
+		if firstBuff[0] != socks5Version {
 			return errors.New("unsupported SOCKS version")
 		}
 	}
@@ -165,21 +166,29 @@ func socks5HandleRequest(conn *net.Conn) error {
 		return errors.New("failed to read request")
 	}
 
-	if buf[0] != socksVersion {
+	if buf[0] != socks5Version {
 		return errors.New("unsupported SOCKS version")
 	}
 
-	cmd := buf[1]
-
-	switch cmd {
-	case cmdConnect:
-
-	case cmdBind:
-		return errors.New("unsupported command")
-	case cmdUDP:
-		return errors.New("unsupported command")
+	targetAddr, err := handleRequestAddr(buf)
+	if err != nil {
+		return err
 	}
 
+	cmd := buf[1]
+	switch cmd {
+	case cmdConnect:
+		return handleConnect(conn, targetAddr)
+	case cmdBind:
+		return handleBind(conn, targetAddr)
+	case cmdUDP:
+		return errors.New("unsupported command")
+	default:
+		return errors.New("unsupported command")
+	}
+}
+
+func handleRequestAddr(buf []byte) (string, error) {
 	addrType := buf[3]
 	var addr string
 	var port uint16
@@ -196,14 +205,20 @@ func socks5HandleRequest(conn *net.Conn) error {
 		addr = string(buf[5 : 5+addrLen])
 		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
 	default:
-		return errors.New("unsupported address type")
+		return "", errors.New("unsupported address type")
 	}
-
-	return socks5Transport(conn, utils.FormatAddress(addr, port))
+	return utils.FormatAddress(addr, port), nil
 }
 
-func socks5Transport(conn *net.Conn, targetAddr string) error {
+func handleConnect(conn *net.Conn, targetAddr string) error {
 	targetConn, err := net.DialTimeout("tcp", targetAddr, utils.TcpConnectTimeout)
+	// The server evaluates the request, and returns a reply formed as follows:
+	//
+	//    +----+-----+-------+------+----------+----------+
+	//    |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+	//    +----+-----+-------+------+----------+----------+
+	//    | 1  |  1  | X'00' |  1   | Variable |    2     |
+	//    +----+-----+-------+------+----------+----------+
 	if err != nil {
 		_, err = (*conn).Write(connectFailed)
 		if err != nil {
@@ -219,23 +234,68 @@ func socks5Transport(conn *net.Conn, targetAddr string) error {
 	}(targetConn)
 
 	clientAddr := (*conn).RemoteAddr().String()
-	log.Printf("[SOCKS5] %s <--> %s", clientAddr, targetAddr)
+	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
 	_, err = (*conn).Write(connectSuccess)
 	if err != nil {
 		return err
 	}
 
+	return transportData(&targetConn, conn)
+}
+
+func handleBind(conn *net.Conn, targetAddr string) error {
+	listener, err := net.Listen("tcp", targetAddr)
+	if err != nil {
+		(*conn).Write(connectRefused)
+		return err
+	}
+	defer listener.Close()
+
+	localAddr := listener.Addr().(*net.TCPAddr)
+	resp := []byte{socks5Version, 0, 0, addrIPv4}
+	resp = append(resp, localAddr.IP.To4()...)
+	portBuf := make([]byte, 2)
+	binary.BigEndian.PutUint16(portBuf, uint16(localAddr.Port))
+	resp = append(resp, portBuf...)
+	if _, err = (*conn).Write(resp); err != nil {
+		return err
+	}
+
+	targetConn, err := listener.Accept()
+	if err != nil {
+		(*conn).Write(connectFailed)
+		return err
+	}
+	defer targetConn.Close()
+
+	resp = []byte{socks5Version, 0, 0, addrIPv4}
+	resp = append(resp, localAddr.IP.To4()...)
+	binary.BigEndian.PutUint16(portBuf, uint16(localAddr.Port))
+	resp = append(resp, portBuf...)
+	if _, err = (*conn).Write(resp); err != nil {
+		return err
+	}
+
+	clientAddr := (*conn).RemoteAddr().String()
+	log.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetAddr)
+
+	return transportData(&targetConn, conn)
+}
+
+func handleUDP() {}
+
+func transportData(source, target *net.Conn) error {
 	go func() {
-		_, err = io.Copy(targetConn, *conn)
+		_, err := io.Copy(*source, *target)
 		if err != nil {
-			log.Println("response to client error", clientAddr)
+			log.Println("response to client error", err)
 		}
 	}()
 
-	_, err = io.Copy(*conn, targetConn)
+	_, err := io.Copy(*target, *source)
 	if err != nil {
-		log.Println("request to server error", clientAddr)
+		log.Println("request to server error", err)
 		return err
 	}
 
