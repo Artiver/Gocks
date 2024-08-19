@@ -4,7 +4,6 @@ import (
 	"Gocks/utils"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/url"
@@ -130,17 +129,9 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		}
 	}
 
-	go func() {
-		_, err = io.Copy(server, *conn)
-		if err != nil {
-			log.Println("response to client error", clientAddr)
-			return
-		}
-	}()
-
-	_, err = io.Copy(*conn, server)
+	err = utils.TransportData(&server, conn)
 	if err != nil {
-		log.Println("request to server error", tcpAddress)
-		return
+		log.Println("[HTTP]", err)
 	}
+
 }

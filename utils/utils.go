@@ -2,6 +2,8 @@ package utils
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"strings"
 	"time"
 )
@@ -27,6 +29,26 @@ func FormatAddress(ip string, port uint16) string {
 	} else {
 		return fmt.Sprintf("%s:%d", ip, port)
 	}
+}
+
+func TransportData(source, target *net.Conn) error {
+	errChan := make(chan error, 1)
+
+	go func() {
+		_, err := io.Copy(*source, *target)
+		errChan <- err
+	}()
+
+	go func() {
+		_, err := io.Copy(*target, *source)
+		errChan <- err
+	}()
+
+	err := <-errChan
+	if err != nil && err == io.EOF {
+		err = nil
+	}
+	return err
 }
 
 func SetBaseInfo(ip string, port uint16, username, password string) {
