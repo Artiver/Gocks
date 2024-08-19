@@ -286,18 +286,21 @@ func handleBind(conn *net.Conn, targetAddr string) error {
 func handleUDP() {}
 
 func transportData(source, target *net.Conn) error {
+	errChan := make(chan error, 1)
+
 	go func() {
 		_, err := io.Copy(*source, *target)
-		if err != nil {
-			log.Println("response to client error", err)
-		}
+		errChan <- err
 	}()
 
-	_, err := io.Copy(*target, *source)
-	if err != nil {
-		log.Println("request to server error", err)
-		return err
-	}
+	go func() {
+		_, err := io.Copy(*target, *source)
+		errChan <- err
+	}()
 
-	return nil
+	err := <-errChan
+	if err != nil && err == io.EOF {
+		err = nil
+	}
+	return err
 }
