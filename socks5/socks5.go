@@ -27,8 +27,7 @@ const addrDomain = 0x03
 func Run() {
 	listen, err := net.Listen("tcp", utils.Config.BindAddress)
 	if err != nil {
-		log.Println("Error listening:", err)
-		log.Panic(err)
+		log.Fatalln("Error listening:", err)
 	}
 	defer func(listen net.Listener) {
 		err = listen.Close()
