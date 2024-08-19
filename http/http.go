@@ -16,7 +16,7 @@ const connectMethod = "CONNECT"
 var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.CombineIpPort)
+	listen, err := net.Listen("tcp", utils.Config.BindAddress)
 	if err != nil {
 		log.Println("Error listening:", err)
 		log.Panic(err)
@@ -28,7 +28,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("HTTP proxy listening", utils.Config.CombineIpPort)
+	log.Println("HTTP proxy listening", utils.Config.BindAddress)
 
 	for {
 		conn, err := listen.Accept()

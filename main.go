@@ -9,31 +9,27 @@ import (
 	"log"
 )
 
-var Server string
 var Username string
 var Password string
-var Host string
-var Port uint
+var BindAddress string
 
 func init() {
-	flag.StringVar(&Server, "type", "mix", "server type, [socks5, http, mix]")
+	flag.StringVar(&BindAddress, "L", ":8181", "Proxy Address")
 	flag.StringVar(&Username, "user", "", "Username for proxy auth")
 	flag.StringVar(&Password, "pass", "", "Password for proxy auth")
-	flag.StringVar(&Host, "host", "", "Host for proxy")
-	flag.UintVar(&Port, "port", 8181, "Port for proxy")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Lmicroseconds)
 }
 
 func main() {
-	utils.SetBaseInfo(Host, uint16(Port), Username, Password)
-	switch Server {
-	case "socks5":
+	utils.SetBaseInfo(BindAddress, Username, Password)
+	switch utils.Server {
+	case utils.ProxySocks5:
 		socks5.Run()
-	case "http":
+	case utils.ProxyHTTP:
 		http.Run()
-	case "mix":
+	case utils.ProxyMix:
 		mix.Run()
 	}
 }
