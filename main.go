@@ -15,8 +15,8 @@ var BindAddress string
 
 func init() {
 	flag.StringVar(&BindAddress, "L", ":8181", "Proxy Address")
-	flag.StringVar(&Username, "user", "", "Username for proxy auth")
-	flag.StringVar(&Password, "pass", "", "Password for proxy auth")
+	flag.StringVar(&Username, "u", "", "Username for proxy auth")
+	flag.StringVar(&Password, "p", "", "Password for proxy auth")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Lmicroseconds)
