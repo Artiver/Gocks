@@ -26,17 +26,7 @@ const ProxySocks5 = "socks5"
 const ProxyHTTP = "http"
 const ProxyMix = "mix"
 
-func SetBaseInfo(bindAddr, forwardAddr, username, password string) {
-	Config = BindConfig{
-		Username: username,
-		Password: password,
-		BindAddr: bindAddr,
-	}
-
-	Forward = ForwardConfig{
-		BindAddr: forwardAddr,
-	}
-
+func SetBaseInfo() {
 	if Config.Username != "" && Config.Password != "" {
 		AuthRequired = true
 	} else {
@@ -49,9 +39,9 @@ func SetBaseInfo(bindAddr, forwardAddr, username, password string) {
 		ForwardRequired = false
 	}
 
-	if strings.HasPrefix(bindAddr, ProxySocks5) {
+	if strings.HasPrefix(Config.BindAddr, ProxySocks5) {
 		Server = ProxySocks5
-	} else if strings.HasPrefix(bindAddr, ProxyHTTP) {
+	} else if strings.HasPrefix(Config.BindAddr, ProxyHTTP) {
 		Server = ProxyHTTP
 	} else {
 		Server = ProxyMix
