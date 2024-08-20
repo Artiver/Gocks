@@ -9,7 +9,7 @@ import (
 )
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.BindAddr)
+	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Println("Error listening:", err)
 		log.Panic(err)
@@ -21,7 +21,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("MIX proxy listening", utils.Config.BindAddr)
+	log.Println("MIX proxy listening", utils.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()

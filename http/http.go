@@ -13,11 +13,11 @@ import (
 const cr = byte('\r')
 const connectMethod = "CONNECT"
 
-var authRequired = []byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\n\r\n")
+var authRequired = []byte("HTTP/1.1 407 ProxyConfig Authentication Required\r\nProxyConfig-Authenticate: Basic realm=\"ProxyConfig\"\r\n\r\n")
 var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.BindAddr)
+	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -28,7 +28,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("HTTP proxy listening", utils.Config.BindAddr)
+	log.Println("HTTP proxy listening", utils.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -68,7 +68,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}
 	firstLine := string(firstBuff[:index])
 
-	if utils.AuthRequired {
+	if utils.ProxyConfig.Auth != nil {
 		headers := parseHeaders(firstBuff[index+2:])
 		if !checkProxyAuthorization(headers) {
 			_, err := (*conn).Write(authRequired)

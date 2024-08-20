@@ -9,24 +9,25 @@ import (
 	"log"
 )
 
+var proxyAddr string
+var forwardAddr string
+
 func init() {
-	flag.StringVar(&(utils.Config.BindAddr), "L", ":8181", "Proxy Listen Address")
-	flag.StringVar(&(utils.Forward.BindAddr), "F", "", "Proxy ForwardConfig Address")
-	flag.StringVar(&(utils.Config.Username), "u", "", "Username for proxy auth")
-	flag.StringVar(&(utils.Config.Password), "p", "", "Password for proxy auth")
+	flag.StringVar(&proxyAddr, "L", ":8181", "ProxyConfig Listen Address")
+	flag.StringVar(&forwardAddr, "F", "", "ProxyConfig ForwardConfig Address")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Lmicroseconds)
 }
 
 func main() {
-	utils.SetBaseInfo()
-	switch utils.Server {
-	case utils.ProxySocks5:
+	utils.ParseArgsInfo(proxyAddr, forwardAddr)
+	switch utils.ProxyConfig.Scheme {
+	case utils.Socks5:
 		socks5.Run()
-	case utils.ProxyHTTP:
+	case utils.HTTP:
 		http.Run()
-	case utils.ProxyMix:
+	default:
 		mix.Run()
 	}
 }

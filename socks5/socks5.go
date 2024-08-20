@@ -25,7 +25,7 @@ const addrIPv6 = 0x04
 const addrDomain = 0x03
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.BindAddr)
+	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -36,7 +36,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("SOCKS5 proxy listening", utils.Config.BindAddr)
+	log.Println("SOCKS5 proxy listening", utils.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -95,7 +95,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	//     | 1  |   1    |
 	//     +----+--------+
 
-	if utils.AuthRequired {
+	if utils.ProxyConfig.Auth != nil {
 		// 通知客户端使用用户密码认证
 		_, err := (*conn).Write(authUsernamePassword)
 		if err != nil {
@@ -133,7 +133,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		// | 1  |   1    |
 		// +----+--------+
 
-		if username != utils.Config.Username || password != utils.Config.Password {
+		if username != utils.ProxyConfig.Auth.User || password != utils.ProxyConfig.Auth.Password {
 			_, err = (*conn).Write(authFailed)
 			if err != nil {
 				return err

@@ -1,49 +1,33 @@
 package utils
 
 import (
+	"log"
 	"strings"
 )
 
-type ForwardConfig struct {
-	Username string
-	Password string
-	BindAddr string
-}
-
-type BindConfig struct {
-	Username string
-	Password string
-	BindAddr string
-}
-
-var Server string
-var Config BindConfig
-var Forward ForwardConfig
-var AuthRequired bool
+var ProxyConfig Url
+var ForwardConfig Url
 var ForwardRequired bool
 
-const ProxySocks5 = "socks5"
-const ProxyHTTP = "http"
-const ProxyMix = "mix"
+const Socks5 = "socks5"
+const HTTP = "http"
 
-func SetBaseInfo() {
-	if Config.Username != "" && Config.Password != "" {
-		AuthRequired = true
-	} else {
-		AuthRequired = false
+func ParseArgsInfo(proxyAddr, forwardAddr string) {
+	if strings.HasPrefix(proxyAddr, ":") {
+		proxyAddr = "mix://" + proxyAddr
 	}
 
-	if Forward.BindAddr != "" {
+	if err := ParseUrl(proxyAddr, &ProxyConfig); err != nil {
+		log.Fatalln(err)
+	}
+
+	if err := ParseUrl(forwardAddr, &ForwardConfig); err != nil {
+		log.Fatalln(err)
+	}
+
+	if ForwardConfig.BindAddr != "" {
 		ForwardRequired = true
 	} else {
 		ForwardRequired = false
-	}
-
-	if strings.HasPrefix(Config.BindAddr, ProxySocks5) {
-		Server = ProxySocks5
-	} else if strings.HasPrefix(Config.BindAddr, ProxyHTTP) {
-		Server = ProxyHTTP
-	} else {
-		Server = ProxyMix
 	}
 }
