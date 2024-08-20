@@ -187,7 +187,7 @@ func socks5HandleRequest(conn *net.Conn) error {
 	case cmdBind:
 		return handleBind(conn, targetAddr)
 	case cmdUDP:
-		return errors.New("unsupported command")
+		return handleUDPAssociate(conn)
 	default:
 		return errors.New("unsupported command")
 	}
