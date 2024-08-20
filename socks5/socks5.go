@@ -25,7 +25,7 @@ const addrIPv6 = 0x04
 const addrDomain = 0x03
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.BindAddress)
+	listen, err := net.Listen("tcp", utils.Config.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -36,7 +36,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("SOCKS5 proxy listening", utils.Config.BindAddress)
+	log.Println("SOCKS5 proxy listening", utils.Config.BindAddr)
 
 	for {
 		conn, err := listen.Accept()

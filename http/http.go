@@ -17,7 +17,7 @@ var authRequired = []byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-A
 var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.Config.BindAddress)
+	listen, err := net.Listen("tcp", utils.Config.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -28,7 +28,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("HTTP proxy listening", utils.Config.BindAddress)
+	log.Println("HTTP proxy listening", utils.Config.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -111,7 +111,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		}
 	}
 
-	server, err := net.DialTimeout("tcp", tcpAddress, utils.TcpConnectTimeout)
+	server, err := utils.DialTcpConnection(tcpAddress)
 	if err != nil {
 		log.Println(err)
 		return

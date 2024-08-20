@@ -4,25 +4,37 @@ import (
 	"strings"
 )
 
-type Configure struct {
-	Username    string
-	Password    string
-	BindAddress string
+type ForwardConfig struct {
+	Username string
+	Password string
+	BindAddr string
+}
+
+type BindConfig struct {
+	Username string
+	Password string
+	BindAddr string
 }
 
 var Server string
-var Config Configure
+var Config BindConfig
+var Forward ForwardConfig
 var AuthRequired bool
+var ForwardRequired bool
 
 const ProxySocks5 = "socks5"
 const ProxyHTTP = "http"
 const ProxyMix = "mix"
 
-func SetBaseInfo(bindAddress, username, password string) {
-	Config = Configure{
-		Username:    username,
-		Password:    password,
-		BindAddress: bindAddress,
+func SetBaseInfo(bindAddr, forwardAddr, username, password string) {
+	Config = BindConfig{
+		Username: username,
+		Password: password,
+		BindAddr: bindAddr,
+	}
+
+	Forward = ForwardConfig{
+		BindAddr: forwardAddr,
 	}
 
 	if Config.Username != "" && Config.Password != "" {
@@ -31,9 +43,15 @@ func SetBaseInfo(bindAddress, username, password string) {
 		AuthRequired = false
 	}
 
-	if strings.HasPrefix(bindAddress, ProxySocks5) {
+	if Forward.BindAddr != "" {
+		ForwardRequired = true
+	} else {
+		ForwardRequired = false
+	}
+
+	if strings.HasPrefix(bindAddr, ProxySocks5) {
 		Server = ProxySocks5
-	} else if strings.HasPrefix(bindAddress, ProxyHTTP) {
+	} else if strings.HasPrefix(bindAddr, ProxyHTTP) {
 		Server = ProxyHTTP
 	} else {
 		Server = ProxyMix

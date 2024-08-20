@@ -11,7 +11,7 @@ import (
 )
 
 func handleConnect(conn *net.Conn, targetAddr string) error {
-	targetConn, err := net.DialTimeout("tcp", targetAddr, utils.TcpConnectTimeout)
+	targetConn, err := utils.DialTcpConnection(targetAddr)
 
 	// The server evaluates the request, and returns a reply formed as follows:
 	//

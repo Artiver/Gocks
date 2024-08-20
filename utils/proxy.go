@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"golang.org/x/net/proxy"
 	"io"
 	"net"
 	"strings"
@@ -38,4 +39,16 @@ func TransportData(source, target *net.Conn) error {
 		err = nil
 	}
 	return err
+}
+
+func DialTcpConnection(address string) (net.Conn, error) {
+	if ForwardRequired {
+		dialer, err := proxy.SOCKS5("tcp", Forward.BindAddr, nil, proxy.Direct)
+		if err != nil {
+			return nil, err
+		}
+		return dialer.Dial("tcp", address)
+	} else {
+		return net.DialTimeout("tcp", address, TcpConnectTimeout)
+	}
 }

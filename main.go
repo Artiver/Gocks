@@ -11,10 +11,12 @@ import (
 
 var Username string
 var Password string
-var BindAddress string
+var ListenAddress string
+var ForwardAddress string
 
 func init() {
-	flag.StringVar(&BindAddress, "L", ":8181", "Proxy Address")
+	flag.StringVar(&ListenAddress, "L", ":8181", "Proxy Listen Address")
+	flag.StringVar(&ForwardAddress, "F", "", "Proxy ForwardConfig Address")
 	flag.StringVar(&Username, "u", "", "Username for proxy auth")
 	flag.StringVar(&Password, "p", "", "Password for proxy auth")
 	flag.Parse()
@@ -23,7 +25,7 @@ func init() {
 }
 
 func main() {
-	utils.SetBaseInfo(BindAddress, Username, Password)
+	utils.SetBaseInfo(ListenAddress, ForwardAddress, Username, Password)
 	switch utils.Server {
 	case utils.ProxySocks5:
 		socks5.Run()
