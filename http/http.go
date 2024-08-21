@@ -11,7 +11,6 @@ import (
 )
 
 const cr = byte('\r')
-const connectMethod = "CONNECT"
 
 var authRequired = []byte("HTTP/1.1 407 ProxyConfig Authentication Required\r\nProxyConfig-Authenticate: Basic realm=\"ProxyConfig\"\r\n\r\n")
 var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
@@ -68,7 +67,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}
 	firstLine := string(firstBuff[:index])
 
-	if utils.ProxyConfig.Auth != nil {
+	if utils.ProxyConfig.Socks5Auth != nil {
 		headers := parseHeaders(firstBuff[index+2:])
 		if !checkProxyAuthorization(headers) {
 			_, err := (*conn).Write(authRequired)
@@ -87,7 +86,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}
 
 	// CONNECT www.google.com:443 HTTP/1.1
-	justHttpsProxy := method == connectMethod && !strings.HasPrefix(rawUrl, "/")
+	justHttpsProxy := method == utils.ConnectMethod && !strings.HasPrefix(rawUrl, "/")
 
 	// https代理 直接返回建立成功的标识
 	tcpAddress := rawUrl

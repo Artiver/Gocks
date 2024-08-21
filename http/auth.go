@@ -47,5 +47,5 @@ func checkProxyAuthorization(headers map[string]string) bool {
 	}
 
 	username, password := authParts[0], authParts[1]
-	return username == utils.ProxyConfig.Auth.User && password == utils.ProxyConfig.Auth.Password
+	return username == utils.ProxyConfig.Socks5Auth.User && password == utils.ProxyConfig.Socks5Auth.Password
 }
