@@ -5,12 +5,10 @@ http/socks5代理工具，支持上游代理，仅在授权的安全测试活动
 
 # 特性
 
-- HTTP代理
-- HTTP代理Basic认证
-- Socks5代理
-- Socks5代理用户密码认证
+- HTTP代理（Basic认证）
+- Socks5代理（用户密码认证）
 - 混合代理
-- 上游Socks5代理
+- 上游HTTP/Socks5代理
 
 # 编译
 
@@ -33,7 +31,13 @@ Gocks_windows_amd64.exe
 Gocks_windows_amd64.exe -L 192.168.100.1:8080
 
 # 绑定IP端口，socks5+http代理，认证
-Gocks_windows_amd64.exe -L 192.168.100.1:8080 -u username -p password
+Gocks_windows_amd64.exe -L mix://username:password@192.168.100.1:8080
+
+# 开启Socks5代理，并将其转发给上游http代理
+Gocks_windows_amd64.exe -L socks5://:8080 -F http://192.168.200.1:8080
+
+# 开启HTTP代理，并将其转发给上游socks5代理
+Gocks_windows_amd64.exe -L http://:8080 -F socks5://192.168.200.1:8080
 ```
 
 # 参考
