@@ -3,7 +3,6 @@ package utils
 import (
 	"Gocks/global"
 	"encoding/base64"
-	"golang.org/x/net/proxy"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,8 +28,8 @@ func ParseUrl(str string, arg *global.Url) error {
 	arg.HttpBasicAuth = http.Header{}
 	arg.HttpBasicAuth.Set(global.ProxyConnectKey, global.ProxyConnectValue)
 	if username != "" && password != "" {
-		arg.Socks5Auth = &proxy.Auth{
-			User:     username,
+		arg.Socks5Auth = &global.Auth{
+			Username: username,
 			Password: password,
 		}
 		arg.HttpBasicAuth.Set(global.BasicAuthHeader, global.BasicAuthPrefix+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))

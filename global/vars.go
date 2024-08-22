@@ -1,14 +1,17 @@
 package global
 
 import (
-	"golang.org/x/net/proxy"
 	"net/http"
 )
+
+type Auth struct {
+	Username, Password string
+}
 
 type Url struct {
 	Scheme        string
 	BindAddr      string
-	Socks5Auth    *proxy.Auth
+	Socks5Auth    *Auth
 	HttpBasicAuth http.Header
 }
 

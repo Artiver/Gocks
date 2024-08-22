@@ -8,6 +8,10 @@ var ConnectFailed = []byte{Socks5Version, 0x01, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0
 var ConnectRefused = []byte{Socks5Version, 0x05, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0}
 var ConnectSuccess = []byte{Socks5Version, 0x00, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0}
 
+var ClientRequestIPv4 = []byte{Socks5Version, CmdConnect, 0x00, AddrIPv4}
+var ClientRequestIPv6 = []byte{Socks5Version, CmdConnect, 0x00, AddrIPv6}
+var ClientRequestDomain = []byte{Socks5Version, CmdConnect, 0x00, AddrDomain}
+
 const Socks5Version = 0x05
 const CmdConnect = 0x01
 const CmdBind = 0x02
