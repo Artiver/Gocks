@@ -1,6 +1,7 @@
 package socks5
 
 import (
+	"Gocks/global"
 	"Gocks/utils"
 	"bytes"
 	"encoding/binary"
@@ -22,7 +23,7 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 	//    +----+-----+-------+------+----------+----------+
 
 	if err != nil {
-		_, err1 := (*conn).Write(connectFailed)
+		_, err1 := (*conn).Write(global.ConnectFailed)
 		if err1 != nil {
 			return err1
 		}
@@ -38,7 +39,7 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 	clientAddr := (*conn).RemoteAddr().String()
 	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
-	_, err = (*conn).Write(connectSuccess)
+	_, err = (*conn).Write(global.ConnectSuccess)
 	if err != nil {
 		return err
 	}
@@ -49,13 +50,13 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 func handleBind(conn *net.Conn, targetAddr string) error {
 	listener, err := net.Listen("tcp", targetAddr)
 	if err != nil {
-		(*conn).Write(connectRefused)
+		(*conn).Write(global.ConnectRefused)
 		return err
 	}
 	defer listener.Close()
 
 	localAddr := listener.Addr().(*net.TCPAddr)
-	resp := []byte{socks5Version, 0, 0, addrIPv4}
+	resp := []byte{global.Socks5Version, 0, 0, global.AddrIPv4}
 	resp = append(resp, localAddr.IP.To4()...)
 	portBuf := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBuf, uint16(localAddr.Port))
@@ -66,12 +67,12 @@ func handleBind(conn *net.Conn, targetAddr string) error {
 
 	targetConn, err := listener.Accept()
 	if err != nil {
-		(*conn).Write(connectFailed)
+		(*conn).Write(global.ConnectFailed)
 		return err
 	}
 	defer targetConn.Close()
 
-	resp = []byte{socks5Version, 0, 0, addrIPv4}
+	resp = []byte{global.Socks5Version, 0, 0, global.AddrIPv4}
 	resp = append(resp, localAddr.IP.To4()...)
 	binary.BigEndian.PutUint16(portBuf, uint16(localAddr.Port))
 	resp = append(resp, portBuf...)
@@ -103,11 +104,11 @@ func parseUDPHeader(buf *bytes.Buffer) (*UDPHeader, error) {
 	header.AddrType, _ = buf.ReadByte()
 
 	switch header.AddrType {
-	case addrIPv4:
+	case global.AddrIPv4:
 		header.DstAddr = make([]byte, net.IPv4len)
-	case addrIPv6:
+	case global.AddrIPv6:
 		header.DstAddr = make([]byte, net.IPv6len)
-	case addrDomain:
+	case global.AddrDomain:
 		addrLen, _ := buf.ReadByte()
 		header.DstAddr = make([]byte, addrLen)
 	default:
@@ -133,7 +134,7 @@ func handleUDPAssociate(conn *net.Conn) error {
 	}
 	udpConn, err := net.ListenUDP("udp", localAddr)
 	if err != nil {
-		(*conn).Write([]byte{socks5Version, 0x01})
+		(*conn).Write([]byte{global.Socks5Version, 0x01})
 		return err
 	}
 	defer udpConn.Close()
@@ -142,7 +143,7 @@ func handleUDPAssociate(conn *net.Conn) error {
 
 	// Respond with the local address of the UDP server
 	udpAddr := udpConn.LocalAddr().(*net.UDPAddr)
-	resp := []byte{socks5Version, 0x00, 0x00, addrIPv4}
+	resp := []byte{global.Socks5Version, 0x00, 0x00, global.AddrIPv4}
 	resp = append(resp, udpAddr.IP.To4()...)
 	portBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBytes, uint16(udpAddr.Port))
