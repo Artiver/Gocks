@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"Gocks/global"
 	"bufio"
 	"errors"
 	"fmt"
@@ -10,13 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
-
-const ConnectMethod = "CONNECT"
-const Socks5HandleBytes = 256
-const DefaultReadBytes = 512
-const TcpConnectTimeout = 5 * time.Second
 
 func FormatAddress(ip string, port uint16) string {
 	if strings.Contains(ip, ":") {
@@ -47,16 +42,16 @@ func TransportData(source, target *net.Conn) error {
 }
 
 func DialTcpConnection(address string) (net.Conn, error) {
-	if ForwardRequired {
-		switch ForwardConfig.Scheme {
-		case Socks5:
-			dialer, err := proxy.SOCKS5("tcp", ForwardConfig.BindAddr, ForwardConfig.Socks5Auth, proxy.Direct)
+	if global.ForwardRequired {
+		switch global.ForwardConfig.Scheme {
+		case global.Socks5:
+			dialer, err := proxy.SOCKS5("tcp", global.ForwardConfig.BindAddr, global.ForwardConfig.Socks5Auth, proxy.Direct)
 			if err != nil {
 				return nil, err
 			}
 			return dialer.Dial("tcp", address)
-		case HTTP:
-			tcpAddr, err := net.ResolveTCPAddr("tcp", ForwardConfig.BindAddr)
+		case global.HTTP:
+			tcpAddr, err := net.ResolveTCPAddr("tcp", global.ForwardConfig.BindAddr)
 			if err != nil {
 				return nil, err
 			}
@@ -65,10 +60,10 @@ func DialTcpConnection(address string) (net.Conn, error) {
 				return nil, err
 			}
 			req := &http.Request{
-				Method: ConnectMethod,
+				Method: global.ConnectMethod,
 				URL:    &url.URL{Host: address},
 				Host:   address,
-				Header: ForwardConfig.HttpBasicAuth,
+				Header: global.ForwardConfig.HttpBasicAuth,
 			}
 			if err = req.Write(tcpConn); err != nil {
 				tcpConn.Close()
@@ -88,6 +83,6 @@ func DialTcpConnection(address string) (net.Conn, error) {
 			return nil, errors.New("forward not supported yet")
 		}
 	} else {
-		return net.DialTimeout("tcp", address, TcpConnectTimeout)
+		return net.DialTimeout("tcp", address, global.TcpConnectTimeout)
 	}
 }

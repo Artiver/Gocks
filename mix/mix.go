@@ -1,15 +1,15 @@
 package mix
 
 import (
+	"Gocks/global"
 	"Gocks/http"
 	"Gocks/socks5"
-	"Gocks/utils"
 	"log"
 	"net"
 )
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
+	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Println("Error listening:", err)
 		log.Panic(err)
@@ -21,7 +21,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("MIX proxy listening", utils.ProxyConfig.BindAddr)
+	log.Println("MIX proxy listening", global.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -34,7 +34,7 @@ func Run() {
 }
 
 func chooseProxy(conn *net.Conn) {
-	buff := make([]byte, utils.DefaultReadBytes)
+	buff := make([]byte, global.DefaultReadBytes)
 	if _, err := (*conn).Read(buff); err != nil {
 		log.Printf("Error reading from connection: %v", err)
 		return

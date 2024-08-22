@@ -1,6 +1,7 @@
 package http
 
 import (
+	"Gocks/global"
 	"Gocks/utils"
 	"bytes"
 	"fmt"
@@ -10,13 +11,8 @@ import (
 	"strings"
 )
 
-const cr = byte('\r')
-
-var authRequired = []byte("HTTP/1.1 407 ProxyConfig Authentication Required\r\nProxyConfig-Authenticate: Basic realm=\"ProxyConfig\"\r\n\r\n")
-var connectResponse = []byte("HTTP/1.1 200 Connection established\r\n\r\n")
-
 func Run() {
-	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
+	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -27,7 +23,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("HTTP proxy listening", utils.ProxyConfig.BindAddr)
+	log.Println("HTTP proxy listening", global.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -52,7 +48,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}(*conn)
 
 	if firstBuff == nil {
-		firstBuff = make([]byte, utils.DefaultReadBytes)
+		firstBuff = make([]byte, global.DefaultReadBytes)
 		_, err := (*conn).Read(firstBuff)
 		if err != nil {
 			log.Println("read http data error")
@@ -60,17 +56,17 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 		}
 	}
 
-	index := bytes.IndexByte(firstBuff, cr)
+	index := bytes.IndexByte(firstBuff, global.CR)
 	if index == -1 {
 		log.Println("not http proxy request")
 		return
 	}
 	firstLine := string(firstBuff[:index])
 
-	if utils.ProxyConfig.Socks5Auth != nil {
+	if global.ProxyConfig.Socks5Auth != nil {
 		headers := parseHeaders(firstBuff[index+2:])
 		if !checkProxyAuthorization(headers) {
-			_, err := (*conn).Write(authRequired)
+			_, err := (*conn).Write(global.AuthRequiredResponse)
 			if err != nil {
 				log.Println("send 407 error:", err)
 			}
@@ -86,7 +82,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	}
 
 	// CONNECT www.google.com:443 HTTP/1.1
-	justHttpsProxy := method == utils.ConnectMethod && !strings.HasPrefix(rawUrl, "/")
+	justHttpsProxy := method == global.ConnectMethod && !strings.HasPrefix(rawUrl, "/")
 
 	// https代理 直接返回建立成功的标识
 	tcpAddress := rawUrl
@@ -126,7 +122,7 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	log.Printf("[HTTP] %s <--> %s", clientAddr, tcpAddress)
 
 	if justHttpsProxy {
-		_, err = (*conn).Write(connectResponse)
+		_, err = (*conn).Write(global.ConnectedResponse)
 		if err != nil {
 			log.Println("Established to client error", clientAddr)
 			return

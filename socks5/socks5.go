@@ -1,6 +1,7 @@
 package socks5
 
 import (
+	"Gocks/global"
 	"Gocks/utils"
 	"encoding/binary"
 	"errors"
@@ -25,7 +26,7 @@ const addrIPv6 = 0x04
 const addrDomain = 0x03
 
 func Run() {
-	listen, err := net.Listen("tcp", utils.ProxyConfig.BindAddr)
+	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -36,7 +37,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("SOCKS5 proxy listening", utils.ProxyConfig.BindAddr)
+	log.Println("SOCKS5 proxy listening", global.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -68,7 +69,7 @@ func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
 
 func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	if firstBuff == nil {
-		firstBuff = make([]byte, utils.Socks5HandleBytes)
+		firstBuff = make([]byte, global.Socks5HandleBytes)
 
 		// The client connects to the server, and sends a version identifier/method selection message:
 		//
@@ -95,7 +96,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	//     | 1  |   1    |
 	//     +----+--------+
 
-	if utils.ProxyConfig.Socks5Auth != nil {
+	if global.ProxyConfig.Socks5Auth != nil {
 		// 通知客户端使用用户密码认证
 		_, err := (*conn).Write(authUsernamePassword)
 		if err != nil {
@@ -133,7 +134,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		// | 1  |   1    |
 		// +----+--------+
 
-		if username != utils.ProxyConfig.Socks5Auth.User || password != utils.ProxyConfig.Socks5Auth.Password {
+		if username != global.ProxyConfig.Socks5Auth.User || password != global.ProxyConfig.Socks5Auth.Password {
 			_, err = (*conn).Write(authFailed)
 			if err != nil {
 				return err
@@ -156,7 +157,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 }
 
 func socks5HandleRequest(conn *net.Conn) error {
-	buf := make([]byte, utils.Socks5HandleBytes)
+	buf := make([]byte, global.Socks5HandleBytes)
 
 	// The SOCKS request is formed as follows:
 	//

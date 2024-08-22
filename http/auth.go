@@ -1,22 +1,20 @@
 package http
 
 import (
-	"Gocks/utils"
+	"Gocks/global"
 	"bytes"
 	"encoding/base64"
 	"log"
 	"strings"
 )
 
-const basicAuthHeader = "proxy-authorization"
-
 func parseHeaders(data []byte) map[string]string {
 	headers := make(map[string]string)
-	lines := bytes.Split(data, []byte("\r\n"))
+	lines := bytes.Split(data, global.CRLF)
 	for _, line := range lines {
 		parts := strings.SplitN(string(line), ": ", 2)
-		if len(parts) == 2 && strings.ToLower(parts[0]) == basicAuthHeader {
-			headers[basicAuthHeader] = parts[1]
+		if len(parts) == 2 && parts[0] == global.BasicAuthHeader {
+			headers[global.BasicAuthHeader] = parts[1]
 			break
 		}
 	}
@@ -24,17 +22,16 @@ func parseHeaders(data []byte) map[string]string {
 }
 
 func checkProxyAuthorization(headers map[string]string) bool {
-	authHeader, exists := headers[basicAuthHeader]
+	authHeader, exists := headers[global.BasicAuthHeader]
 	if !exists {
 		return false
 	}
 
-	const prefix = "Basic "
-	if !strings.HasPrefix(authHeader, prefix) {
+	if !strings.HasPrefix(authHeader, global.BasicAuthPrefix) {
 		return false
 	}
 
-	encoded := strings.TrimPrefix(authHeader, prefix)
+	encoded := strings.TrimPrefix(authHeader, global.BasicAuthPrefix)
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		log.Println("failed to decode ProxyConfig-Authorization header:", err)
@@ -47,5 +44,5 @@ func checkProxyAuthorization(headers map[string]string) bool {
 	}
 
 	username, password := authParts[0], authParts[1]
-	return username == utils.ProxyConfig.Socks5Auth.User && password == utils.ProxyConfig.Socks5Auth.Password
+	return username == global.ProxyConfig.Socks5Auth.User && password == global.ProxyConfig.Socks5Auth.Password
 }

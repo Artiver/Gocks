@@ -22,11 +22,11 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 	//    +----+-----+-------+------+----------+----------+
 
 	if err != nil {
-		_, err = (*conn).Write(connectFailed)
-		if err != nil {
-			return err
+		_, err1 := (*conn).Write(connectFailed)
+		if err1 != nil {
+			return err1
 		}
-		return errors.New("dial tcp " + targetAddr)
+		return err
 	}
 	defer func(targetConn net.Conn) {
 		err = targetConn.Close()

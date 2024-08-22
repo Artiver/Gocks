@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Gocks/global"
 	"Gocks/http"
 	"Gocks/mix"
 	"Gocks/socks5"
@@ -22,10 +23,10 @@ func init() {
 
 func main() {
 	utils.ParseArgsInfo(proxyAddr, forwardAddr)
-	switch utils.ProxyConfig.Scheme {
-	case utils.Socks5:
+	switch global.ProxyConfig.Scheme {
+	case global.Socks5:
 		socks5.Run()
-	case utils.HTTP:
+	case global.HTTP:
 		http.Run()
 	default:
 		mix.Run()
