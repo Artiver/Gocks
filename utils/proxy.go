@@ -1,15 +1,12 @@
 package utils
 
 import (
+	"Gocks/forward"
 	"Gocks/global"
-	"bufio"
 	"errors"
 	"fmt"
-	"golang.org/x/net/proxy"
 	"io"
 	"net"
-	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -45,40 +42,9 @@ func DialTcpConnection(address string) (net.Conn, error) {
 	if global.ForwardRequired {
 		switch global.ForwardConfig.Scheme {
 		case global.Socks5:
-			dialer, err := proxy.SOCKS5("tcp", global.ForwardConfig.BindAddr, global.ForwardConfig.Socks5Auth, proxy.Direct)
-			if err != nil {
-				return nil, err
-			}
-			return dialer.Dial("tcp", address)
+			return forward.DialSocks5ProxyConnection(address)
 		case global.HTTP:
-			tcpAddr, err := net.ResolveTCPAddr("tcp", global.ForwardConfig.BindAddr)
-			if err != nil {
-				return nil, err
-			}
-			tcpConn, err := net.DialTCP("tcp", nil, tcpAddr)
-			if err != nil {
-				return nil, err
-			}
-			req := &http.Request{
-				Method: global.ConnectMethod,
-				URL:    &url.URL{Host: address},
-				Host:   address,
-				Header: global.ForwardConfig.HttpBasicAuth,
-			}
-			if err = req.Write(tcpConn); err != nil {
-				tcpConn.Close()
-				return nil, err
-			}
-			resp, err := http.ReadResponse(bufio.NewReader(tcpConn), req)
-			if err != nil {
-				tcpConn.Close()
-				return nil, err
-			}
-			if resp.StatusCode != http.StatusOK {
-				tcpConn.Close()
-				return nil, errors.New(resp.Status)
-			}
-			return tcpConn, nil
+			return forward.DialHTTPProxyConnection(address)
 		default:
 			return nil, errors.New("forward not supported yet")
 		}

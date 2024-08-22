@@ -9,22 +9,6 @@ import (
 	"net"
 )
 
-var authNone = []byte{socks5Version, 0x00}
-var authUsernamePassword = []byte{socks5Version, 0x02}
-var authFailed = []byte{0x01, 0x01}
-var authSuccess = []byte{0x01, 0x00}
-var connectFailed = []byte{socks5Version, 0x01, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
-var connectRefused = []byte{socks5Version, 0x05, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
-var connectSuccess = []byte{socks5Version, 0x00, 0x00, addrIPv4, 0, 0, 0, 0, 0, 0}
-
-const socks5Version = 0x05
-const cmdConnect = 0x01
-const cmdBind = 0x02
-const cmdUDP = 0x03
-const addrIPv4 = 0x01
-const addrIPv6 = 0x04
-const addrDomain = 0x03
-
 func Run() {
 	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
 	if err != nil {
@@ -83,7 +67,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
 		}
-		if firstBuff[0] != socks5Version {
+		if firstBuff[0] != global.Socks5Version {
 			return errors.New("unsupported SOCKS version")
 		}
 	}
@@ -98,7 +82,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 
 	if global.ProxyConfig.Socks5Auth != nil {
 		// 通知客户端使用用户密码认证
-		_, err := (*conn).Write(authUsernamePassword)
+		_, err := (*conn).Write(global.AuthUsernamePassword)
 		if err != nil {
 			return err
 		}
@@ -135,19 +119,19 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		// +----+--------+
 
 		if username != global.ProxyConfig.Socks5Auth.User || password != global.ProxyConfig.Socks5Auth.Password {
-			_, err = (*conn).Write(authFailed)
+			_, err = (*conn).Write(global.AuthFailed)
 			if err != nil {
 				return err
 			}
 			return errors.New("authentication failed")
 		}
 
-		_, err = (*conn).Write(authSuccess)
+		_, err = (*conn).Write(global.AuthSuccess)
 		if err != nil {
 			return err
 		}
 	} else {
-		_, err := (*conn).Write(authNone)
+		_, err := (*conn).Write(global.AuthNone)
 		if err != nil {
 			return err
 		}
@@ -172,7 +156,7 @@ func socks5HandleRequest(conn *net.Conn) error {
 		return errors.New("failed to read request")
 	}
 
-	if buf[0] != socks5Version {
+	if buf[0] != global.Socks5Version {
 		return errors.New("unsupported SOCKS version")
 	}
 
@@ -183,11 +167,11 @@ func socks5HandleRequest(conn *net.Conn) error {
 
 	cmd := buf[1]
 	switch cmd {
-	case cmdConnect:
+	case global.CmdConnect:
 		return handleConnect(conn, targetAddr)
-	case cmdBind:
+	case global.CmdBind:
 		return handleBind(conn, targetAddr)
-	case cmdUDP:
+	case global.CmdUDP:
 		return handleUDPAssociate(conn)
 	default:
 		return errors.New("unsupported command")
@@ -200,13 +184,13 @@ func handleRequestAddr(buf []byte) (string, error) {
 	var port uint16
 
 	switch addrType {
-	case addrIPv4:
+	case global.AddrIPv4:
 		addr = net.IP(buf[4:8]).String()
 		port = binary.BigEndian.Uint16(buf[8:10])
-	case addrIPv6:
+	case global.AddrIPv6:
 		addr = net.IP(buf[4:20]).String()
 		port = binary.BigEndian.Uint16(buf[20:22])
-	case addrDomain:
+	case global.AddrDomain:
 		addrLen := buf[4]
 		addr = string(buf[5 : 5+addrLen])
 		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
