@@ -1,7 +1,7 @@
 NAME := Gocks
 GO_BUILD := go build --ldflags="-s -w"
 DIRECTORY := bin
-PLATFORMS := linux_amd64 linux_arm64 windows_amd64
+PLATFORMS := darwin_amd64 darwin_arm64 linux_amd64 linux_arm64 windows_amd64 windows_arm64
 
 $(PLATFORMS):
 	$(eval GOOS := $(word 1,$(subst _, ,$@)))
