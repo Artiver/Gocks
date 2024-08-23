@@ -82,7 +82,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 
 	if global.ProxyConfig.Socks5Auth != nil {
 		// 通知客户端使用用户密码认证
-		_, err := (*conn).Write(global.AuthUsernamePassword)
+		_, err := (*conn).Write(global.ResponseAuthUsernamePassword)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 			return err
 		}
 	} else {
-		_, err := (*conn).Write(global.AuthNone)
+		_, err := (*conn).Write(global.ResponseAuthNone)
 		if err != nil {
 			return err
 		}

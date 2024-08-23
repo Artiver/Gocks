@@ -2,6 +2,7 @@ package forward
 
 import (
 	"Gocks/global"
+	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -27,8 +28,16 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	}
 
 	// 建立连接请求
-	// todo: 判断地址类型
-	req := global.ClientRequestDomain // SOCKS5, 连接命令, 保留字节, 使用域名
+	var req []byte
+	hostType := judgeAddrType(host)
+	switch hostType {
+	case global.AddrIPv4:
+		req = global.ClientRequestIPv4
+	case global.AddrIPv6:
+		req = global.ClientRequestIPv6
+	case global.AddrDomain:
+		req = global.ClientRequestDomain
+	}
 	req = append(req, byte(len(host)))
 	req = append(req, host...)
 	req = append(req, []byte{byte(portNum >> 8), byte(portNum & 0xff)}...)
@@ -54,34 +63,54 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	return conn, nil
 }
 
-// socks5Handshake 实现 SOCKS5 的握手过程
 func socks5Handshake(conn net.Conn) error {
-	// 客户端发送版本和认证方法
-	_, err := conn.Write([]byte{0x05, 0x01, 0x00}) // SOCKS5, 1个方法, 不需要认证
+	_, err := conn.Write(global.ClientInitialReq)
 	if err != nil {
 		return err
 	}
 
-	// 服务器响应选择的认证方法
 	response := make([]byte, 2)
 	_, err = io.ReadFull(conn, response)
 	if err != nil {
 		return err
 	}
 
-	// 确保服务器选择了不需要认证的方法
-	// todo: 认证流程
-	if response[0] != 0x05 || response[1] != 0x00 {
-		return errors.New("不支持的认证方法")
+	if bytes.Equal(response, global.ResponseAuthNone) {
+		return nil
+	} else if bytes.Equal(response, global.ResponseAuthUsernamePassword) {
+		if global.ForwardConfig.Socks5Auth == nil {
+			return errors.New("forward socks5 server need authentication")
+		}
+		req := []byte{0x01}
+		req = append(req, byte(len(global.ForwardConfig.Socks5Auth.Username)))
+		req = append(req, global.ForwardConfig.Socks5Auth.Username...)
+		req = append(req, byte(len(global.ForwardConfig.Socks5Auth.Password)))
+		req = append(req, global.ForwardConfig.Socks5Auth.Password...)
+		_, err = conn.Write(req)
+		if err != nil {
+			return errors.New("response auth info error")
+		}
+		_, err = io.ReadFull(conn, response)
+		if err != nil {
+			return errors.New("receive auth result error")
+		}
+		if bytes.Equal(response, global.AuthSuccess) {
+			return nil
+		} else {
+			return errors.New("socks5 auth error")
+		}
+	} else {
+		return errors.New("unknown response")
 	}
-
-	return nil
 }
 
 func judgeAddrType(address string) int {
 	ip := net.ParseIP(address)
-	if ip != nil && ip.To4() != nil {
-		return global.AddrIPv4
+	if ip != nil {
+		if ip.To4() != nil {
+			return global.AddrIPv4
+		}
+		return global.AddrIPv6
 	}
-	return global.AddrIPv6
+	return global.AddrDomain
 }

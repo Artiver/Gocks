@@ -28,7 +28,7 @@ func ParseUrl(str string, arg *global.Url) error {
 	arg.HttpBasicAuth = http.Header{}
 	arg.HttpBasicAuth.Set(global.ProxyConnectKey, global.ProxyConnectValue)
 	if username != "" && password != "" {
-		arg.Socks5Auth = &global.Auth{
+		arg.Socks5Auth = &global.AuthInfo{
 			Username: username,
 			Password: password,
 		}

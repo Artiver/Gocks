@@ -4,14 +4,14 @@ import (
 	"net/http"
 )
 
-type Auth struct {
+type AuthInfo struct {
 	Username, Password string
 }
 
 type Url struct {
 	Scheme        string
 	BindAddr      string
-	Socks5Auth    *Auth
+	Socks5Auth    *AuthInfo
 	HttpBasicAuth http.Header
 }
 

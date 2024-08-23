@@ -1,13 +1,14 @@
 package global
 
-var AuthNone = []byte{Socks5Version, 0x00}
-var AuthUsernamePassword = []byte{Socks5Version, 0x02}
+var ResponseAuthNone = []byte{Socks5Version, 0x00}
+var ResponseAuthUsernamePassword = []byte{Socks5Version, 0x02}
 var AuthFailed = []byte{0x01, 0x01}
 var AuthSuccess = []byte{0x01, 0x00}
 var ConnectFailed = []byte{Socks5Version, 0x01, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0}
 var ConnectRefused = []byte{Socks5Version, 0x05, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0}
 var ConnectSuccess = []byte{Socks5Version, 0x00, 0x00, AddrIPv4, 0, 0, 0, 0, 0, 0}
 
+var ClientInitialReq = []byte{Socks5Version, CmdConnect, 0x00}
 var ClientRequestIPv4 = []byte{Socks5Version, CmdConnect, 0x00, AddrIPv4}
 var ClientRequestIPv6 = []byte{Socks5Version, CmdConnect, 0x00, AddrIPv6}
 var ClientRequestDomain = []byte{Socks5Version, CmdConnect, 0x00, AddrDomain}
