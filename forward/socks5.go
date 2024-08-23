@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
 )
 
 func DialSocks5ProxyConnection(address string) (net.Conn, error) {
@@ -20,30 +21,17 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// 将端口号转换为字节
-	portNum, err := net.LookupPort("tcp", port)
+	portNum, err := strconv.Atoi(port)
 	if err != nil {
 		return nil, err
 	}
 
 	// 建立连接请求
-	var req []byte
-	hostType := judgeAddrType(host)
-	switch hostType {
-	case global.AddrIPv4:
-		req = global.ClientRequestIPv4
-	case global.AddrIPv6:
-		req = global.ClientRequestIPv6
-	case global.AddrDomain:
-		req = global.ClientRequestDomain
-	}
-	req = append(req, byte(len(host)))
-	req = append(req, host...)
-	req = append(req, []byte{byte(portNum >> 8), byte(portNum & 0xff)}...)
+	hostType := formatAddressRequest(host)
+	hostType = append(hostType, []byte{byte(portNum >> 8), byte(portNum & 0xff)}...)
 
 	// 发送连接请求
-	_, err = conn.Write(req)
+	_, err = conn.Write(hostType)
 	if err != nil {
 		return nil, err
 	}
@@ -99,13 +87,21 @@ func socks5Handshake(conn net.Conn) error {
 	}
 }
 
-func judgeAddrType(address string) int {
+func formatAddressRequest(address string) []byte {
+	var req []byte
 	ip := net.ParseIP(address)
 	if ip != nil {
-		if ip.To4() != nil {
-			return global.AddrIPv4
+		if ipv4 := ip.To4(); ipv4 != nil {
+			req = global.ClientRequestIPv4
+			req = append(req, ipv4...)
+			return req
 		}
-		return global.AddrIPv6
+		req = global.ClientRequestIPv6
+		req = append(req, ip.To16()...)
+		return req
 	}
-	return global.AddrDomain
+	req = global.ClientRequestDomain
+	req = append(req, byte(len(address)))
+	req = append(req, []byte(address)...)
+	return req
 }
