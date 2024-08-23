@@ -118,7 +118,7 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		// | 1  |   1    |
 		// +----+--------+
 
-		if username != global.ProxyConfig.Socks5Auth.Username || password != global.ProxyConfig.Socks5Auth.Password {
+		if username != global.ProxyConfig.Username || password != global.ProxyConfig.Password {
 			_, err = (*conn).Write(global.AuthFailed)
 			if err != nil {
 				return err

@@ -9,9 +9,10 @@ type AuthInfo struct {
 }
 
 type Url struct {
-	Scheme        string
-	BindAddr      string
-	Socks5Auth    *AuthInfo
+	Scheme   string
+	BindAddr string
+	*AuthInfo
+	Socks5Auth    []byte
 	HttpBasicAuth http.Header
 }
 

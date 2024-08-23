@@ -81,12 +81,7 @@ func socks5Handshake(conn net.Conn) error {
 		if global.ForwardConfig.Socks5Auth == nil {
 			return errors.New("forward socks5 server need authentication")
 		}
-		req := []byte{0x01}
-		req = append(req, byte(len(global.ForwardConfig.Socks5Auth.Username)))
-		req = append(req, global.ForwardConfig.Socks5Auth.Username...)
-		req = append(req, byte(len(global.ForwardConfig.Socks5Auth.Password)))
-		req = append(req, global.ForwardConfig.Socks5Auth.Password...)
-		_, err = conn.Write(req)
+		_, err = conn.Write(global.ForwardConfig.Socks5Auth)
 		if err != nil {
 			return errors.New("response auth info error")
 		}
