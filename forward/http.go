@@ -22,7 +22,7 @@ func DialHTTPProxyConnection(address string) (net.Conn, error) {
 		Method: global.ConnectMethod,
 		URL:    &url.URL{Host: address},
 		Host:   address,
-		Header: global.ForwardConfig.HttpBasicAuth,
+		Header: global.ForwardConfig.HttpAuthHeader,
 	}
 	if err = req.Write(tcpConn); err != nil {
 		tcpConn.Close()

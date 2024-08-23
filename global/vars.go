@@ -11,9 +11,9 @@ type AuthInfo struct {
 type Url struct {
 	Scheme   string
 	BindAddr string
-	*AuthInfo
-	Socks5Auth    []byte
-	HttpBasicAuth http.Header
+	AuthInfo
+	Socks5Auth     []byte
+	HttpAuthHeader http.Header
 }
 
 var ProxyConfig Url
