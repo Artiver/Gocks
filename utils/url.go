@@ -39,5 +39,6 @@ func ParseUrl(str string, arg *global.Url) error {
 	} else {
 		arg.Socks5Auth = nil
 	}
+	arg.TranAddr = strings.TrimPrefix(u.Path, "/")
 	return nil
 }

@@ -11,6 +11,7 @@ type AuthInfo struct {
 type Url struct {
 	Scheme   string
 	BindAddr string
+	TranAddr string
 	AuthInfo
 	Socks5Auth     []byte
 	HttpAuthHeader http.Header

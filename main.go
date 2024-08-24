@@ -5,6 +5,7 @@ import (
 	"Gocks/http"
 	"Gocks/mix"
 	"Gocks/socks5"
+	"Gocks/tcp"
 	"Gocks/utils"
 	"flag"
 	"log"
@@ -28,6 +29,8 @@ func main() {
 		socks5.Run()
 	case global.HTTP:
 		http.Run()
+	case global.TCP:
+		tcp.Run()
 	default:
 		mix.Run()
 	}

@@ -4,12 +4,13 @@ import (
 	"time"
 )
 
-const Socks5 = "socks5"
+const TCP = "tcp"
 const HTTP = "http"
+const Socks5 = "socks5"
 
 const ConnectMethod = "CONNECT"
-const Socks5HandleBytes = 256
 const DefaultReadBytes = 512
+const Socks5HandleBytes = 256
 const TcpConnectTimeout = 5 * time.Second
 
 const BasicAuthHeader = "Proxy-Authorization"
