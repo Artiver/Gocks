@@ -1,10 +1,11 @@
 
 # 简介
 
-http/socks5代理工具，支持上游代理，仅在授权的安全测试活动下使用。
+http/socks5代理工具，支持上游代理，支持tcp端口转发，仅在授权的安全测试活动下使用。
 
 # 特性
 
+- TCP端口转发
 - HTTP代理（Basic认证）
 - Socks5代理（用户密码认证）
 - 混合代理
@@ -26,6 +27,9 @@ make all
 ```shell
 # 全零监听，端口8181，socks5+http代理，不认证
 Gocks_windows_amd64.exe
+
+# 端口转发，将192.168.100.1:8181转发到192.168.134.1:8080
+Gocks_windows_amd64.exe -L tcp://192.168.100.1:8181/192.168.134.1:8080
 
 # 绑定IP端口，socks5+http代理，不认证
 Gocks_windows_amd64.exe -L 192.168.100.1:8080
