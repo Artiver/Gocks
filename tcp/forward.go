@@ -33,6 +33,11 @@ func Run() {
 }
 
 func handleConnection(src *net.Conn) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
 	dst, err := net.Dial("tcp", global.ProxyConfig.TranAddr)
 	defer dst.Close()
 	defer (*src).Close()

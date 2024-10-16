@@ -37,6 +37,11 @@ func Run() {
 }
 
 func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
 	if conn == nil {
 		return
 	}

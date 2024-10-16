@@ -34,6 +34,11 @@ func Run() {
 }
 
 func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
 	defer func(conn net.Conn) {
 		err := conn.Close()
 		if err != nil {
