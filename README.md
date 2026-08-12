@@ -1,4 +1,5 @@
 
+
 # 简介
 
 http/socks5代理工具，支持上游代理，支持端口转发，请在授权的安全测试活动下使用。
@@ -42,7 +43,7 @@ Gocks_windows_amd64.exe -L udp://192.168.100.1:8181/192.168.134.1:8080
 Gocks_windows_amd64.exe
 
 # 绑定IP端口，socks5+http代理，不认证
-Gocks_windows_amd64.exe -L 192.168.100.1:8080
+Gocks_windows_amd64.exe -L mix://192.168.100.1:8080
 
 # 绑定IP端口，socks5+http代理，认证
 Gocks_windows_amd64.exe -L mix://username:password@192.168.100.1:8080
