@@ -7,22 +7,29 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 )
 
 func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	conn, err := net.DialTimeout("tcp", global.ForwardConfig.BindAddr, global.TcpConnectTimeout)
+	if err != nil {
+		return nil, err
+	}
 
 	if err = socks5Handshake(conn); err != nil {
+		conn.Close()
 		return nil, err
 	}
 
 	// 解析目标地址
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -33,6 +40,7 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	// 发送连接请求
 	_, err = conn.Write(hostType)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -40,11 +48,13 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 	resp := make([]byte, 10) // 响应至少10个字节
 	_, err = io.ReadFull(conn, resp)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
 	// 检查响应是否成功
 	if resp[1] != 0x00 {
+		conn.Close()
 		return nil, errors.New("连接失败，响应码")
 	}
 
@@ -52,6 +62,9 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 }
 
 func socks5Handshake(conn net.Conn) error {
+	conn.SetReadDeadline(time.Now().Add(global.HandshakeTimeout))
+	defer conn.SetReadDeadline(time.Time{})
+
 	_, err := conn.Write(global.ClientInitialReq)
 	if err != nil {
 		return err

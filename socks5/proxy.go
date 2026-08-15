@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"time"
 )
 
 func Run() {
@@ -68,6 +69,9 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		//     | 1  |    1     | 1 to 255 |
 		//     +----+----------+----------+
 
+		if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+			return err
+		}
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
@@ -100,6 +104,9 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		// | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
 		// +----+------+----------+------+----------+
 
+		if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+			return err
+		}
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read authentication request")
@@ -110,9 +117,15 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		}
 
 		usernameLen := int(firstBuff[1])
+		if 2+usernameLen > n {
+			return errors.New("invalid username length")
+		}
 		username := string(firstBuff[2 : 2+usernameLen])
 
 		passwordLen := int(firstBuff[2+usernameLen])
+		if 3+usernameLen+passwordLen > n {
+			return errors.New("invalid password length")
+		}
 		password := string(firstBuff[3+usernameLen : 3+usernameLen+passwordLen])
 
 		// The server verifies the supplied UNAME and PASSWD, and sends the following response:
@@ -156,16 +169,22 @@ func socks5HandleRequest(conn *net.Conn) error {
 	// | 1  |  1  | X'00' |  1   | Variable |    2     |
 	// +----+-----+-------+------+----------+----------+
 
+	if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+		return err
+	}
 	n, err := (*conn).Read(buf)
 	if err != nil || n < 7 {
 		return errors.New("failed to read request")
+	}
+	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+		return err
 	}
 
 	if buf[0] != global.Socks5Version {
 		return errors.New("unsupported SOCKS version")
 	}
 
-	targetAddr, err := handleRequestAddr(buf)
+	targetAddr, err := handleRequestAddr(buf, n)
 	if err != nil {
 		return err
 	}
@@ -183,20 +202,29 @@ func socks5HandleRequest(conn *net.Conn) error {
 	}
 }
 
-func handleRequestAddr(buf []byte) (string, error) {
+func handleRequestAddr(buf []byte, n int) (string, error) {
 	addrType := buf[3]
 	var addr string
 	var port uint16
 
 	switch addrType {
 	case global.AddrIPv4:
+		if n < 10 {
+			return "", errors.New("invalid IPv4 address")
+		}
 		addr = net.IP(buf[4:8]).String()
 		port = binary.BigEndian.Uint16(buf[8:10])
 	case global.AddrIPv6:
+		if n < 22 {
+			return "", errors.New("invalid IPv6 address")
+		}
 		addr = net.IP(buf[4:20]).String()
 		port = binary.BigEndian.Uint16(buf[20:22])
 	case global.AddrDomain:
-		addrLen := buf[4]
+		addrLen := int(buf[4])
+		if 5+addrLen+2 > n {
+			return "", errors.New("invalid domain address")
+		}
 		addr = string(buf[5 : 5+addrLen])
 		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
 	default:

@@ -22,9 +22,8 @@ func Run() {
 
 	log.Println("UDP port listening", global.ProxyConfig.BindAddr)
 
-	buffer := make([]byte, global.UdpReadBytes)
-
 	for {
+		buffer := make([]byte, global.UdpReadBytes)
 		size, clientAddr, err := listen.ReadFrom(buffer)
 		if err != nil {
 			log.Printf("Failed to read from client connection: %v", err)
@@ -36,6 +35,11 @@ func Run() {
 }
 
 func handleRequest(data []byte, size int, clientAddr net.Addr, listen net.PacketConn) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
 	// Forward data to the server
 	forwardConn, err := net.Dial("udp", global.ProxyConfig.TranAddr)
 	if err != nil {

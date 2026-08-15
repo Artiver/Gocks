@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 func Run() {
@@ -54,11 +55,20 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 
 	if firstBuff == nil {
 		firstBuff = make([]byte, global.DefaultReadBytes)
-		_, err := (*conn).Read(firstBuff)
-		if err != nil {
+		if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+			log.Println("set read deadline error")
+			return
+		}
+		n, err := (*conn).Read(firstBuff)
+		if err != nil || n < 1 {
 			log.Println("read http data error")
 			return
 		}
+		if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+			log.Println("reset read deadline error")
+			return
+		}
+		firstBuff = firstBuff[:n]
 	}
 
 	index := bytes.IndexByte(firstBuff, global.CR)
@@ -69,6 +79,10 @@ func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
 	firstLine := string(firstBuff[:index])
 
 	if global.ProxyConfig.Socks5Auth != nil {
+		if index+2 > len(firstBuff) {
+			log.Println("malformed http request")
+			return
+		}
 		headers := parseHeaders(firstBuff[index+2:])
 		if !checkProxyAuthorization(headers) {
 			_, err := (*conn).Write(global.AuthRequiredResponse)

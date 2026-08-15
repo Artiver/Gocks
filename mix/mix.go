@@ -6,6 +6,7 @@ import (
 	"Gocks/socks5"
 	"log"
 	"net"
+	"time"
 )
 
 func Run() {
@@ -35,8 +36,17 @@ func Run() {
 
 func chooseProxy(conn *net.Conn) {
 	buff := make([]byte, global.DefaultReadBytes)
-	if _, err := (*conn).Read(buff); err != nil {
+	if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+		log.Printf("set read deadline error: %v", err)
+		return
+	}
+	n, err := (*conn).Read(buff)
+	if err != nil || n < 1 {
 		log.Printf("Error reading from connection: %v", err)
+		return
+	}
+	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+		log.Printf("reset read deadline error: %v", err)
 		return
 	}
 
@@ -44,6 +54,6 @@ func chooseProxy(conn *net.Conn) {
 	case 0x05:
 		go socks5.HandleSocks5Connection(conn, buff)
 	default:
-		go http.HandleHTTPConnection(conn, buff)
+		go http.HandleHTTPConnection(conn, buff[:n])
 	}
 }

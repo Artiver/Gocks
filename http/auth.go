@@ -34,7 +34,7 @@ func checkProxyAuthorization(headers map[string]string) bool {
 	encoded := strings.TrimPrefix(authHeader, global.BasicAuthPrefix)
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		log.Println("failed to decode ProxyConfig-Authorization header:", err)
+		log.Println("failed to decode Proxy-Authorization header:", err)
 		return false
 	}
 

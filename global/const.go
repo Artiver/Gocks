@@ -15,6 +15,7 @@ const DefaultReadBytes = 512
 const Socks5HandleBytes = 256
 const TcpConnectTimeout = 5 * time.Second
 const UdpReceiveTimeout = 3 * time.Second
+const HandshakeTimeout = 10 * time.Second
 
 const BasicAuthHeader = "Proxy-Authorization"
 const BasicAuthPrefix = "Basic "

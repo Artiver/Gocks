@@ -38,14 +38,14 @@ func handleConnection(src *net.Conn) {
 			log.Println(err)
 		}
 	}()
-	dst, err := net.Dial("tcp", global.ProxyConfig.TranAddr)
-	defer dst.Close()
+	dst, err := net.DialTimeout("tcp", global.ProxyConfig.TranAddr, global.TcpConnectTimeout)
 	defer (*src).Close()
 
 	if err != nil {
-		log.Println("dia tcp error which", global.ProxyConfig.TranAddr)
+		log.Println("dial tcp error which", global.ProxyConfig.TranAddr)
 		return
 	}
+	defer dst.Close()
 
 	err = utils.TransportData(src, &dst)
 	if err != nil {

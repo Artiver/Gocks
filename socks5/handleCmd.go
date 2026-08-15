@@ -50,7 +50,9 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 func handleBind(conn *net.Conn, targetAddr string) error {
 	listener, err := net.Listen("tcp", targetAddr)
 	if err != nil {
-		(*conn).Write(global.ConnectRefused)
+		if _, werr := (*conn).Write(global.ConnectRefused); werr != nil {
+			return werr
+		}
 		return err
 	}
 	defer listener.Close()
@@ -67,7 +69,9 @@ func handleBind(conn *net.Conn, targetAddr string) error {
 
 	targetConn, err := listener.Accept()
 	if err != nil {
-		(*conn).Write(global.ConnectFailed)
+		if _, werr := (*conn).Write(global.ConnectFailed); werr != nil {
+			return werr
+		}
 		return err
 	}
 	defer targetConn.Close()
@@ -96,12 +100,19 @@ type UDPHeader struct {
 
 func parseUDPHeader(buf *bytes.Buffer) (*UDPHeader, error) {
 	var header UDPHeader
+	var err error
 	if _, err := io.ReadFull(buf, header.Rsv[:]); err != nil {
 		return nil, err
 	}
 
-	header.Frag, _ = buf.ReadByte()
-	header.AddrType, _ = buf.ReadByte()
+	header.Frag, err = buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	header.AddrType, err = buf.ReadByte()
+	if err != nil {
+		return nil, err
+	}
 
 	switch header.AddrType {
 	case global.AddrIPv4:
@@ -109,7 +120,10 @@ func parseUDPHeader(buf *bytes.Buffer) (*UDPHeader, error) {
 	case global.AddrIPv6:
 		header.DstAddr = make([]byte, net.IPv6len)
 	case global.AddrDomain:
-		addrLen, _ := buf.ReadByte()
+		addrLen, err := buf.ReadByte()
+		if err != nil {
+			return nil, err
+		}
 		header.DstAddr = make([]byte, addrLen)
 	default:
 		return nil, errors.New("invalid address type")
@@ -148,7 +162,9 @@ func handleUDPAssociate(conn *net.Conn) error {
 	portBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBytes, uint16(udpAddr.Port))
 	resp = append(resp, portBytes...)
-	(*conn).Write(resp)
+	if _, err := (*conn).Write(resp); err != nil {
+		return err
+	}
 
 	// Read and forward UDP packets
 	buf := make([]byte, 65535)
@@ -166,7 +182,9 @@ func handleUDPAssociate(conn *net.Conn) error {
 		IP:   net.IP(header.DstAddr),
 		Port: int(header.DstPort),
 	}
-	udpConn.WriteToUDP(buf[len(buf)-n:], &targetAddr)
+	if _, err := udpConn.WriteToUDP(buf[:n], &targetAddr); err != nil {
+		return err
+	}
 	log.Printf("[SOCKS5] [UDP] %s -> %s\n", srcAddr, targetAddr.String())
 
 	return nil
