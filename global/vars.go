@@ -22,5 +22,7 @@ var ForwardConfig Url
 var ForwardRequired bool
 
 var CRLF = []byte("\r\n")
-var AuthRequiredResponse = []byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Provide Auth Info\"\r\n\r\n")
-var ConnectedResponse = []byte("HTTP/1.1 200 Connection Established\r\n\r\n")
+var AuthRequiredResponse = []byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Provide Auth Info\"\r\nConnection: close\r\n\r\n")
+var ConnectedResponse = []byte("HTTP/1.1 200 Connection Established\r\nProxy-Agent: gocks\r\n\r\n")
+var BadGatewayResponse = []byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+var GatewayTimeoutResponse = []byte("HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")

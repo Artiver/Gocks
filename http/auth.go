@@ -3,8 +3,10 @@ package http
 import (
 	"Gocks/global"
 	"bytes"
+	"crypto/subtle"
 	"encoding/base64"
 	"log"
+	"net/http"
 	"strings"
 )
 
@@ -26,7 +28,16 @@ func checkProxyAuthorization(headers map[string]string) bool {
 	if !exists {
 		return false
 	}
+	return checkAuthHeader(authHeader)
+}
 
+// checkProxyAuthorizationFromHeader 从 http.Header 检查认证
+func checkProxyAuthorizationFromHeader(header http.Header) bool {
+	return checkAuthHeader(header.Get(global.BasicAuthHeader))
+}
+
+// checkAuthHeader 校验单个 Proxy-Authorization 头值
+func checkAuthHeader(authHeader string) bool {
 	if !strings.HasPrefix(authHeader, global.BasicAuthPrefix) {
 		return false
 	}
@@ -44,5 +55,10 @@ func checkProxyAuthorization(headers map[string]string) bool {
 	}
 
 	username, password := authParts[0], authParts[1]
-	return username == global.ProxyConfig.Username && password == global.ProxyConfig.Password
+	expectedUser := global.ProxyConfig.Username
+	expectedPass := global.ProxyConfig.Password
+
+	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(expectedUser)) == 1
+	passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(expectedPass)) == 1
+	return userMatch && passMatch
 }
