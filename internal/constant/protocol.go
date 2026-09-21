@@ -1,4 +1,4 @@
-package global
+package constant
 
 import (
 	"time"

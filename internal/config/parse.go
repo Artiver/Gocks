@@ -1,14 +1,14 @@
-package utils
+package config
 
 import (
-	"Gocks/global"
 	"encoding/base64"
+	"gocks/internal/constant"
 	"net/http"
 	"net/url"
 	"strings"
 )
 
-func ParseUrl(str string, arg *global.Url) error {
+func ParseUrl(str string, arg *Url) error {
 	u, err := url.Parse(str)
 	if err != nil {
 		return err
@@ -26,14 +26,14 @@ func ParseUrl(str string, arg *global.Url) error {
 	arg.Scheme = u.Scheme
 	arg.BindAddr = host
 	arg.HttpAuthHeader = http.Header{}
-	arg.HttpAuthHeader.Set(global.ProxyConnectKey, global.ProxyConnectValue)
+	arg.HttpAuthHeader.Set(constant.ProxyConnectKey, constant.ProxyConnectValue)
 	if username != "" && password != "" {
 		arg.Socks5Auth = []byte{0x01}
 		arg.Socks5Auth = append(arg.Socks5Auth, byte(len(username)))
 		arg.Socks5Auth = append(arg.Socks5Auth, username...)
 		arg.Socks5Auth = append(arg.Socks5Auth, byte(len(password)))
 		arg.Socks5Auth = append(arg.Socks5Auth, password...)
-		arg.HttpAuthHeader.Set(global.BasicAuthHeader, global.BasicAuthPrefix+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+		arg.HttpAuthHeader.Set(constant.BasicAuthHeader, constant.BasicAuthPrefix+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 		arg.Username = username
 		arg.Password = password
 	} else {

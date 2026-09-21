@@ -1,15 +1,16 @@
 package udp
 
 import (
-	"Gocks/global"
 	"errors"
+	"gocks/internal/config"
+	"gocks/internal/constant"
 	"log"
 	"net"
 	"time"
 )
 
 func Run() {
-	listen, err := net.ListenPacket("udp", global.ProxyConfig.BindAddr)
+	listen, err := net.ListenPacket("udp", config.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -20,10 +21,10 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("UDP port listening", global.ProxyConfig.BindAddr)
+	log.Println("UDP port listening", config.ProxyConfig.BindAddr)
 
 	for {
-		buffer := make([]byte, global.UdpReadBytes)
+		buffer := make([]byte, constant.UdpReadBytes)
 		size, clientAddr, err := listen.ReadFrom(buffer)
 		if err != nil {
 			log.Printf("Failed to read from client connection: %v", err)
@@ -40,29 +41,25 @@ func handleRequest(data []byte, size int, clientAddr net.Addr, listen net.Packet
 			log.Println(err)
 		}
 	}()
-	// Forward data to the server
-	forwardConn, err := net.Dial("udp", global.ProxyConfig.TranAddr)
+	forwardConn, err := net.Dial("udp", config.ProxyConfig.TranAddr)
 	if err != nil {
-		log.Printf("Failed to forward to %s: %v", global.ProxyConfig.TranAddr, err)
+		log.Printf("Failed to forward to %s: %v", config.ProxyConfig.TranAddr, err)
 		return
 	}
 	defer forwardConn.Close()
 
-	// Send the data to the server
 	_, err = forwardConn.Write(data[:size])
 	if err != nil {
 		log.Printf("Failed to write to forward connection: %v", err)
 		return
 	}
 
-	// Set a read deadline to prevent indefinite waiting
-	err = forwardConn.SetReadDeadline(time.Now().Add(global.UdpReceiveTimeout))
+	err = forwardConn.SetReadDeadline(time.Now().Add(constant.UdpReceiveTimeout))
 	if err != nil {
 		return
 	}
 
-	// Attempt to read the server's response
-	responseBuffer := make([]byte, global.UdpReadBytes)
+	responseBuffer := make([]byte, constant.UdpReadBytes)
 	n, err := forwardConn.Read(responseBuffer)
 	if err != nil {
 		var netErr net.Error
@@ -72,7 +69,6 @@ func handleRequest(data []byte, size int, clientAddr net.Addr, listen net.Packet
 		return
 	}
 
-	// Forward the server's response back to the client
 	_, err = listen.WriteTo(responseBuffer[:n], clientAddr)
 	if err != nil {
 		log.Printf("Failed to write to client connection: %v", err)

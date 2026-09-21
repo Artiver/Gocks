@@ -1,14 +1,14 @@
 package main
 
 import (
-	"Gocks/global"
-	"Gocks/http"
-	"Gocks/mix"
-	"Gocks/socks5"
-	"Gocks/tcp"
-	"Gocks/udp"
-	"Gocks/utils"
 	"flag"
+	"gocks/internal/config"
+	"gocks/internal/constant"
+	"gocks/internal/proxy/http"
+	"gocks/internal/proxy/mix"
+	"gocks/internal/proxy/socks5"
+	"gocks/internal/transport/tcp"
+	"gocks/internal/transport/udp"
 	"log"
 )
 
@@ -24,15 +24,15 @@ func init() {
 }
 
 func main() {
-	utils.ParseArgsInfo(proxyAddr, forwardAddr)
-	switch global.ProxyConfig.Scheme {
-	case global.Socks5:
+	config.ParseArgsInfo(proxyAddr, forwardAddr)
+	switch config.ProxyConfig.Scheme {
+	case constant.Socks5:
 		socks5.Run()
-	case global.HTTP:
+	case constant.HTTP:
 		http.Run()
-	case global.TCP:
+	case constant.TCP:
 		tcp.Run()
-	case global.UDP:
+	case constant.UDP:
 		udp.Run()
 	default:
 		mix.Run()

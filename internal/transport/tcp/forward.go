@@ -1,14 +1,15 @@
 package tcp
 
 import (
-	"Gocks/global"
-	"Gocks/utils"
+	"gocks/internal/config"
+	"gocks/internal/constant"
+	"gocks/internal/tunnel"
 	"log"
 	"net"
 )
 
 func Run() {
-	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
+	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -19,7 +20,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("TCP port listening", global.ProxyConfig.BindAddr)
+	log.Println("TCP port listening", config.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -38,16 +39,16 @@ func handleConnection(src *net.Conn) {
 			log.Println(err)
 		}
 	}()
-	dst, err := net.DialTimeout("tcp", global.ProxyConfig.TranAddr, global.TcpConnectTimeout)
+	dst, err := net.DialTimeout("tcp", config.ProxyConfig.TranAddr, constant.TcpConnectTimeout)
 	defer (*src).Close()
 
 	if err != nil {
-		log.Println("dial tcp error which", global.ProxyConfig.TranAddr)
+		log.Println("dial tcp error which", config.ProxyConfig.TranAddr)
 		return
 	}
 	defer dst.Close()
 
-	err = utils.TransportData(src, &dst)
+	err = tunnel.TransportData(src, &dst)
 	if err != nil {
 		log.Println("transport data error", err)
 	}

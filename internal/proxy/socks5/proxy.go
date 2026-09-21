@@ -1,17 +1,18 @@
 package socks5
 
 import (
-	"Gocks/global"
-	"Gocks/utils"
 	"encoding/binary"
 	"errors"
+	"gocks/internal/config"
+	"gocks/internal/constant"
+	"gocks/internal/tunnel"
 	"log"
 	"net"
 	"time"
 )
 
 func Run() {
-	listen, err := net.Listen("tcp", global.ProxyConfig.BindAddr)
+	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
 	if err != nil {
 		log.Fatalln("Error listening:", err)
 	}
@@ -22,7 +23,7 @@ func Run() {
 		}
 	}(listen)
 
-	log.Println("SOCKS5 proxy listening", global.ProxyConfig.BindAddr)
+	log.Println("SOCKS5 proxy listening", config.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
@@ -59,52 +60,27 @@ func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
 
 func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 	if firstBuff == nil {
-		firstBuff = make([]byte, global.Socks5HandleBytes)
+		firstBuff = make([]byte, constant.Socks5HandleBytes)
 
-		// The client connects to the server, and sends a version identifier/method selection message:
-		//
-		//     +----+----------+----------+
-		//     |VER | NMETHODS | METHODS  |
-		//     +----+----------+----------+
-		//     | 1  |    1     | 1 to 255 |
-		//     +----+----------+----------+
-
-		if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+		if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 			return err
 		}
 		n, err := (*conn).Read(firstBuff)
 		if err != nil || n < 2 {
 			return errors.New("failed to read from client")
 		}
-		if firstBuff[0] != global.Socks5Version {
+		if firstBuff[0] != constant.Socks5Version {
 			return errors.New("unsupported SOCKS version")
 		}
 	}
 
-	// The server selects from one of the methods given in METHODS, and sends a METHOD selection message:
-	//
-	//     +----+--------+
-	//     |VER | METHOD |
-	//     +----+--------+
-	//     | 1  |   1    |
-	//     +----+--------+
-
-	if global.ProxyConfig.Socks5Auth != nil {
-		// 通知客户端使用用户密码认证
-		_, err := (*conn).Write(global.ResponseAuthUsernamePassword)
+	if config.ProxyConfig.Socks5Auth != nil {
+		_, err := (*conn).Write(constant.ResponseAuthUsernamePassword)
 		if err != nil {
 			return err
 		}
 
-		// This begins with the client producing a Username/Password request:
-		//
-		// +----+------+----------+------+----------+
-		// |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
-		// +----+------+----------+------+----------+
-		// | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
-		// +----+------+----------+------+----------+
-
-		if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+		if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 			return err
 		}
 		n, err := (*conn).Read(firstBuff)
@@ -128,28 +104,20 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 		}
 		password := string(firstBuff[3+usernameLen : 3+usernameLen+passwordLen])
 
-		// The server verifies the supplied UNAME and PASSWD, and sends the following response:
-		//
-		// +----+--------+
-		// |VER | STATUS |
-		// +----+--------+
-		// | 1  |   1    |
-		// +----+--------+
-
-		if username != global.ProxyConfig.Username || password != global.ProxyConfig.Password {
-			_, err = (*conn).Write(global.AuthFailed)
+		if username != config.ProxyConfig.Username || password != config.ProxyConfig.Password {
+			_, err = (*conn).Write(constant.AuthFailed)
 			if err != nil {
 				return err
 			}
 			return errors.New("authentication failed")
 		}
 
-		_, err = (*conn).Write(global.AuthSuccess)
+		_, err = (*conn).Write(constant.AuthSuccess)
 		if err != nil {
 			return err
 		}
 	} else {
-		_, err := (*conn).Write(global.ResponseAuthNone)
+		_, err := (*conn).Write(constant.ResponseAuthNone)
 		if err != nil {
 			return err
 		}
@@ -159,17 +127,9 @@ func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
 }
 
 func socks5HandleRequest(conn *net.Conn) error {
-	buf := make([]byte, global.Socks5HandleBytes)
+	buf := make([]byte, constant.Socks5HandleBytes)
 
-	// The SOCKS request is formed as follows:
-	//
-	// +----+-----+-------+------+----------+----------+
-	// |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-	// +----+-----+-------+------+----------+----------+
-	// | 1  |  1  | X'00' |  1   | Variable |    2     |
-	// +----+-----+-------+------+----------+----------+
-
-	if err := (*conn).SetReadDeadline(time.Now().Add(global.HandshakeTimeout)); err != nil {
+	if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}
 	n, err := (*conn).Read(buf)
@@ -180,7 +140,7 @@ func socks5HandleRequest(conn *net.Conn) error {
 		return err
 	}
 
-	if buf[0] != global.Socks5Version {
+	if buf[0] != constant.Socks5Version {
 		return errors.New("unsupported SOCKS version")
 	}
 
@@ -191,11 +151,11 @@ func socks5HandleRequest(conn *net.Conn) error {
 
 	cmd := buf[1]
 	switch cmd {
-	case global.CmdConnect:
+	case constant.CmdConnect:
 		return handleConnect(conn, targetAddr)
-	case global.CmdBind:
+	case constant.CmdBind:
 		return handleBind(conn, targetAddr)
-	case global.CmdUDP:
+	case constant.CmdUDP:
 		return handleUDPAssociate(conn)
 	default:
 		return errors.New("unsupported command")
@@ -208,19 +168,19 @@ func handleRequestAddr(buf []byte, n int) (string, error) {
 	var port uint16
 
 	switch addrType {
-	case global.AddrIPv4:
+	case constant.AddrIPv4:
 		if n < 10 {
 			return "", errors.New("invalid IPv4 address")
 		}
 		addr = net.IP(buf[4:8]).String()
 		port = binary.BigEndian.Uint16(buf[8:10])
-	case global.AddrIPv6:
+	case constant.AddrIPv6:
 		if n < 22 {
 			return "", errors.New("invalid IPv6 address")
 		}
 		addr = net.IP(buf[4:20]).String()
 		port = binary.BigEndian.Uint16(buf[20:22])
-	case global.AddrDomain:
+	case constant.AddrDomain:
 		addrLen := int(buf[4])
 		if 5+addrLen+2 > n {
 			return "", errors.New("invalid domain address")
@@ -230,5 +190,5 @@ func handleRequestAddr(buf []byte, n int) (string, error) {
 	default:
 		return "", errors.New("unsupported address type")
 	}
-	return utils.FormatAddress(addr, port), nil
+	return tunnel.FormatAddress(addr, port), nil
 }

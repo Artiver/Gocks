@@ -1,3 +1,3 @@
-module Gocks
+module gocks
 
 go 1.26

@@ -1,11 +1,11 @@
 package http
 
 import (
-	"Gocks/global"
-	"Gocks/utils"
 	"bufio"
 	"crypto/subtle"
 	"fmt"
+	"gocks/internal/config"
+	"gocks/internal/tunnel"
 	"io"
 	"net"
 	"net/http"
@@ -18,13 +18,13 @@ import (
 
 func startProxy(t *testing.T, auth bool) (string, func()) {
 	if auth {
-		global.ProxyConfig.Username = "testuser"
-		global.ProxyConfig.Password = "testpass"
-		global.ProxyConfig.Socks5Auth = []byte{0x01}
+		config.ProxyConfig.Username = "testuser"
+		config.ProxyConfig.Password = "testpass"
+		config.ProxyConfig.Socks5Auth = []byte{0x01}
 	} else {
-		global.ProxyConfig.Socks5Auth = nil
+		config.ProxyConfig.Socks5Auth = nil
 	}
-	global.ForwardRequired = false
+	config.ForwardRequired = false
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -320,7 +320,7 @@ func TestTransportDataNoLeak(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- utils.TransportData(&connA, &connB)
+		done <- tunnel.TransportData(&connA, &connB)
 	}()
 
 	go func() {

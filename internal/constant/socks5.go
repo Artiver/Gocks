@@ -1,4 +1,4 @@
-package global
+package constant
 
 var ResponseAuthNone = []byte{Socks5Version, 0x00}
 var ResponseAuthUsernamePassword = []byte{Socks5Version, 0x02}

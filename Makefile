@@ -8,9 +8,9 @@ $(PLATFORMS):
 	$(eval GOARCH := $(word 2,$(subst _, ,$@)))
 	$(eval EXT := $(if $(filter windows,$(GOOS)),.exe,))
 ifeq ($(OS),Windows_NT)
-	set GO111MODULE=on&& set GONOSUMDB=*&& set CGO_ENABLED=0&& set GOOS=$(GOOS)&& set GOARCH=$(GOARCH)&& $(GO_BUILD) -o $(DIRECTORY)/$(NAME)_$@$(EXT) .
+	set GO111MODULE=on&& set GONOSUMDB=*&& set CGO_ENABLED=0&& set GOOS=$(GOOS)&& set GOARCH=$(GOARCH)&& $(GO_BUILD) -o $(DIRECTORY)/$(NAME)_$@$(EXT) ./cmd/gocks
 else
-	export GO111MODULE=on GONOSUMDB=* CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) && $(GO_BUILD) -o $(DIRECTORY)/$(NAME)_$@$(EXT) .
+	export GO111MODULE=on GONOSUMDB=* CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) && $(GO_BUILD) -o $(DIRECTORY)/$(NAME)_$@$(EXT) ./cmd/gocks
 endif
 
 all: $(PLATFORMS)

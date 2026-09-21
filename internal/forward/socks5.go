@@ -1,9 +1,10 @@
 package forward
 
 import (
-	"Gocks/global"
 	"bytes"
 	"errors"
+	"gocks/internal/config"
+	"gocks/internal/constant"
 	"io"
 	"net"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 )
 
 func DialSocks5ProxyConnection(address string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", global.ForwardConfig.BindAddr, global.TcpConnectTimeout)
+	conn, err := net.DialTimeout("tcp", config.ForwardConfig.BindAddr, constant.TcpConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -21,7 +22,6 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 		return nil, err
 	}
 
-	// 解析目标地址
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		conn.Close()
@@ -33,26 +33,22 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 		return nil, err
 	}
 
-	// 建立连接请求
 	hostType := formatAddressRequest(host)
 	hostType = append(hostType, []byte{byte(portNum >> 8), byte(portNum & 0xff)}...)
 
-	// 发送连接请求
 	_, err = conn.Write(hostType)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 
-	// 读取服务器的响应
-	resp := make([]byte, 10) // 响应至少10个字节
+	resp := make([]byte, 10)
 	_, err = io.ReadFull(conn, resp)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 
-	// 检查响应是否成功
 	if resp[1] != 0x00 {
 		conn.Close()
 		return nil, errors.New("连接失败，响应码")
@@ -62,10 +58,10 @@ func DialSocks5ProxyConnection(address string) (net.Conn, error) {
 }
 
 func socks5Handshake(conn net.Conn) error {
-	conn.SetReadDeadline(time.Now().Add(global.HandshakeTimeout))
+	conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout))
 	defer conn.SetReadDeadline(time.Time{})
 
-	_, err := conn.Write(global.ClientInitialReq)
+	_, err := conn.Write(constant.ClientInitialReq)
 	if err != nil {
 		return err
 	}
@@ -76,13 +72,13 @@ func socks5Handshake(conn net.Conn) error {
 		return err
 	}
 
-	if bytes.Equal(response, global.ResponseAuthNone) {
+	if bytes.Equal(response, constant.ResponseAuthNone) {
 		return nil
-	} else if bytes.Equal(response, global.ResponseAuthUsernamePassword) {
-		if global.ForwardConfig.Socks5Auth == nil {
+	} else if bytes.Equal(response, constant.ResponseAuthUsernamePassword) {
+		if config.ForwardConfig.Socks5Auth == nil {
 			return errors.New("forward socks5 server need authentication")
 		}
-		_, err = conn.Write(global.ForwardConfig.Socks5Auth)
+		_, err = conn.Write(config.ForwardConfig.Socks5Auth)
 		if err != nil {
 			return errors.New("response auth info error")
 		}
@@ -90,7 +86,7 @@ func socks5Handshake(conn net.Conn) error {
 		if err != nil {
 			return errors.New("receive auth result error")
 		}
-		if bytes.Equal(response, global.AuthSuccess) {
+		if bytes.Equal(response, constant.AuthSuccess) {
 			return nil
 		} else {
 			return errors.New("socks5 auth error")
@@ -105,15 +101,15 @@ func formatAddressRequest(address string) []byte {
 	ip := net.ParseIP(address)
 	if ip != nil {
 		if ipv4 := ip.To4(); ipv4 != nil {
-			req = global.ClientRequestIPv4
+			req = constant.ClientRequestIPv4
 			req = append(req, ipv4...)
 			return req
 		}
-		req = global.ClientRequestIPv6
+		req = constant.ClientRequestIPv6
 		req = append(req, ip.To16()...)
 		return req
 	}
-	req = global.ClientRequestDomain
+	req = constant.ClientRequestDomain
 	req = append(req, byte(len(address)))
 	req = append(req, []byte(address)...)
 	return req
