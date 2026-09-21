@@ -13,6 +13,28 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 - 混合代理
 - 上游HTTP/Socks5代理
 
+# 目录
+
+```plaintext
+Gocks/
+├── cmd/gocks/main.go              # CLI 入口
+├── internal/
+│   ├── constant/                  # 协议常量（protocol.go, socks5.go）
+│   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
+│   ├── tunnel/                    # 数据透传核心（tunnel.go, conn.go）
+│   ├── dialer/                    # 统一拨号入口（dialer.go）
+│   ├── forward/                   # 上游代理拨号（http.go, socks5.go）
+│   ├── proxy/                     # 代理协议
+│   │   ├── http/                  #   HTTP 代理
+│   │   ├── socks5/                #   Socks5 代理
+│   │   └── mix/                   #   混合代理
+│   └── transport/                 # 端口转发
+│       ├── tcp/
+│       └── udp/
+├── go.mod                         # module gocks
+└── Makefile                       # 构建路径 → ./cmd/gocks
+```
+
 # 编译
 
 ```shell
