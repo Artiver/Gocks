@@ -25,6 +25,20 @@ func (c *ReaderConn) SetDeadline(t time.Time) error      { return c.conn.SetDead
 func (c *ReaderConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
 func (c *ReaderConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
 
+func (c *ReaderConn) CloseWrite() error {
+	if cw, ok := c.conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return ErrNotSupported
+}
+
+func (c *ReaderConn) CloseRead() error {
+	if cr, ok := c.conn.(interface{ CloseRead() error }); ok {
+		return cr.CloseRead()
+	}
+	return ErrNotSupported
+}
+
 type PrefixConn struct {
 	prefix *bytes.Reader
 	conn   net.Conn
@@ -47,3 +61,17 @@ func (c *PrefixConn) RemoteAddr() net.Addr               { return c.conn.RemoteA
 func (c *PrefixConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
 func (c *PrefixConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
 func (c *PrefixConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
+
+func (c *PrefixConn) CloseWrite() error {
+	if cw, ok := c.conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return ErrNotSupported
+}
+
+func (c *PrefixConn) CloseRead() error {
+	if cr, ok := c.conn.(interface{ CloseRead() error }); ok {
+		return cr.CloseRead()
+	}
+	return ErrNotSupported
+}
