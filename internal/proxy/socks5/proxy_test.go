@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gocks/internal/config"
+	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 )
 
@@ -61,6 +62,107 @@ func readMethodReply(t *testing.T, c net.Conn) byte {
 		t.Fatalf("unexpected version: %d", reply[0])
 	}
 	return reply[1]
+}
+
+func writeUserPass(t *testing.T, c net.Conn, username, password string) {
+	t.Helper()
+	req := []byte{0x01, byte(len(username))}
+	req = append(req, username...)
+	req = append(req, byte(len(password)))
+	req = append(req, password...)
+	if _, err := c.Write(req); err != nil {
+		t.Fatalf("write user/pass: %v", err)
+	}
+}
+
+// startEcho starts a TCP echo server on loopback and returns its address.
+func startEcho(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				io.Copy(c, c)
+			}(c)
+		}
+	}()
+
+	return ln.Addr().String()
+}
+
+// startSocks5Proxy serves SOCKS5 on loopback and returns its address.
+func startSocks5Proxy(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go HandleSocks5Connection(&c, nil)
+		}
+	}()
+
+	return ln.Addr().String()
+}
+
+// dialSocks5Connect performs a no-auth handshake and a CONNECT to target,
+// returning the established tunnel connection.
+func dialSocks5Connect(t *testing.T, proxyAddr, target string) net.Conn {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	addr, err := socks5proto.NewAddr(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdConnect, addr).Write(&req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(req.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("read connect reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("expected success reply, got rep=%d", reply.Rep)
+	}
+	return conn
 }
 
 func TestHandshakeNoAuth(t *testing.T) {
@@ -189,70 +291,11 @@ func TestSocks5ConnectEndToEnd(t *testing.T) {
 	setAuth("", "", false)
 	config.ForwardRequired = false
 
-	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer echoLn.Close()
-	go func() {
-		for {
-			c, err := echoLn.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				io.Copy(c, c)
-			}(c)
-		}
-	}()
+	echoAddr := startEcho(t)
+	proxyAddr := startSocks5Proxy(t)
 
-	proxyLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proxyLn.Close()
-	go func() {
-		for {
-			c, err := proxyLn.Accept()
-			if err != nil {
-				return
-			}
-			go HandleSocks5Connection(&c, nil)
-		}
-	}()
+	conn := dialSocks5Connect(t, proxyAddr, echoAddr)
 
-	conn, err := net.DialTimeout("tcp", proxyLn.Addr().String(), 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	// Method negotiation.
-	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-		t.Fatal(err)
-	}
-	if method := readMethodReply(t, conn); method != 0x00 {
-		t.Fatalf("expected no-auth method, got %d", method)
-	}
-
-	// CONNECT to the echo server.
-	target := echoLn.Addr().(*net.TCPAddr)
-	ip := target.IP.To4()
-	req := []byte{0x05, 0x01, 0x00, 0x01, ip[0], ip[1], ip[2], ip[3], byte(target.Port >> 8), byte(target.Port)}
-	if _, err := conn.Write(req); err != nil {
-		t.Fatal(err)
-	}
-	resp := make([]byte, 10)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		t.Fatalf("read connect reply: %v", err)
-	}
-	if resp[1] != 0x00 {
-		t.Fatalf("expected success reply, got rep=%d", resp[1])
-	}
-
-	// Round-trip a payload through the tunnel.
 	msg := []byte("ping-pong")
 	if _, err := conn.Write(msg); err != nil {
 		t.Fatal(err)
@@ -266,13 +309,142 @@ func TestSocks5ConnectEndToEnd(t *testing.T) {
 	}
 }
 
-func writeUserPass(t *testing.T, c net.Conn, username, password string) {
-	t.Helper()
-	req := []byte{0x01, byte(len(username))}
-	req = append(req, username...)
-	req = append(req, byte(len(password)))
-	req = append(req, password...)
-	if _, err := c.Write(req); err != nil {
-		t.Fatalf("write user/pass: %v", err)
+// TestSocks5ConnectPipelinedPayload guards the exact-framing fix: a payload
+// coalesced with the CONNECT request must survive the request parse.
+func TestSocks5ConnectPipelinedPayload(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echoAddr := startEcho(t)
+	proxyAddr := startSocks5Proxy(t)
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	addr, err := socks5proto.NewAddr(echoAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdConnect, addr).Write(&req); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte("pipelined-payload")
+	// Request and payload are written together so they may share a segment.
+	if _, err := conn.Write(append(req.Bytes(), payload...)); err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("read connect reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("expected success reply, got rep=%d", reply.Rep)
+	}
+
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("read pipelined payload: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("pipelined payload lost: got %q want %q", got, payload)
+	}
+}
+
+func TestSocks5ConnectDomain(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echoAddr := startEcho(t)
+	proxyAddr := startSocks5Proxy(t)
+
+	_, port, err := net.SplitHostPort(echoAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn := dialSocks5Connect(t, proxyAddr, net.JoinHostPort("localhost", port))
+
+	msg := []byte("domain-ok")
+	if _, err := conn.Write(msg); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len(msg))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	if !bytes.Equal(got, msg) {
+		t.Fatalf("echo mismatch: got %q want %q", got, msg)
+	}
+}
+
+func TestRequestUnsupportedCommand(t *testing.T) {
+	setAuth("", "", false)
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	repCh := make(chan byte, 1)
+	go func() {
+		// CMD=0x09 (invalid), ATYP=IPv4 1.2.3.4:80.
+		client.Write([]byte{0x05, 0x09, 0x00, 0x01, 1, 2, 3, 4, 0, 80})
+		if reply, err := socks5proto.ReadReply(client); err == nil {
+			repCh <- reply.Rep
+		} else {
+			repCh <- 0xFF
+		}
+	}()
+
+	_ = socks5HandleRequest(&server)
+
+	select {
+	case rep := <-repCh:
+		if rep != socks5proto.RepCmdUnsupported {
+			t.Fatalf("expected RepCmdUnsupported, got %d", rep)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reply")
+	}
+}
+
+func TestRequestUnsupportedAddrType(t *testing.T) {
+	setAuth("", "", false)
+
+	server, client := net.Pipe()
+	defer client.Close()
+
+	repCh := make(chan byte, 1)
+	go func() {
+		// CMD=CONNECT, ATYP=0x09 (invalid).
+		client.Write([]byte{0x05, 0x01, 0x00, 0x09})
+		if reply, err := socks5proto.ReadReply(client); err == nil {
+			repCh <- reply.Rep
+		} else {
+			repCh <- 0xFF
+		}
+	}()
+
+	_ = socks5HandleRequest(&server)
+
+	select {
+	case rep := <-repCh:
+		if rep != socks5proto.RepAddrUnsupported {
+			t.Fatalf("expected RepAddrUnsupported, got %d", rep)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reply")
 	}
 }
