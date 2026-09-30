@@ -11,6 +11,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
+	"syscall"
 )
 
 func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
@@ -18,7 +20,7 @@ func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
 	targetConn, err := dialer.DialTcpConnection(targetAddr)
 
 	if err != nil {
-		if err1 := writeReply(conn, socks5proto.RepFailure); err1 != nil {
+		if err1 := writeReply(conn, mapDialErrorToRep(err)); err1 != nil {
 			return err1
 		}
 		return err
@@ -33,11 +35,49 @@ func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
 	clientAddr := (*conn).RemoteAddr().String()
 	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
-	if err := writeReply(conn, socks5proto.RepSucceeded); err != nil {
+	// RFC 1928 §6: report the address the server used to reach the target.
+	if err := writeBndReply(conn, socks5proto.RepSucceeded, targetConn.LocalAddr()); err != nil {
 		return err
 	}
 
 	return tunnel.TransportData(&targetConn, conn)
+}
+
+// mapDialErrorToRep maps a dial error to the closest SOCKS5 reply code.
+func mapDialErrorToRep(err error) byte {
+	if err == nil {
+		return socks5proto.RepSucceeded
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return socks5proto.RepTTLExpired
+	}
+
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return socks5proto.RepConnRefused
+	case errors.Is(err, syscall.EHOSTUNREACH):
+		return socks5proto.RepHostUnreachable
+	case errors.Is(err, syscall.ENETUNREACH):
+		return socks5proto.RepNetUnreachable
+	}
+
+	// Fall back to the error text: the standard library dialer produces
+	// stable, English, platform-independent messages for these cases.
+	s := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(s, "refused"):
+		return socks5proto.RepConnRefused
+	case strings.Contains(s, "no route to host"):
+		return socks5proto.RepHostUnreachable
+	case strings.Contains(s, "unreachable"):
+		return socks5proto.RepNetUnreachable
+	case strings.Contains(s, "timeout"):
+		return socks5proto.RepTTLExpired
+	default:
+		return socks5proto.RepFailure
+	}
 }
 
 func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {

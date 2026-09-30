@@ -129,3 +129,15 @@ func socks5HandleRequest(conn *net.Conn) error {
 func writeReply(conn *net.Conn, rep byte) error {
 	return socks5proto.NewReply(rep, nil).Write(*conn)
 }
+
+// writeBndReply sends a reply carrying the given bound address, falling back
+// to no address (0.0.0.0:0) when it cannot be represented.
+func writeBndReply(conn *net.Conn, rep byte, bnd net.Addr) error {
+	reply := socks5proto.NewReply(rep, nil)
+	if bnd != nil {
+		if addr, err := socks5proto.NewAddr(bnd.String()); err == nil {
+			reply.Addr = addr
+		}
+	}
+	return reply.Write(*conn)
+}
