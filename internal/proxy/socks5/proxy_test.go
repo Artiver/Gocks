@@ -855,6 +855,183 @@ func TestUDPAssociateTerminatesOnTCPClose(t *testing.T) {
 	}
 }
 
+// startUDPRelayUpstream runs a minimal direct SOCKS5 UDP relay used as an
+// upstream proxy: it accepts a UDP ASSOCIATE, replies with its relay address,
+// and forwards datagrams to their targets.
+func startUDPRelayUpstream(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serveUDPRelayUpstream(c)
+		}
+	}()
+
+	return ln.Addr().String()
+}
+
+func serveUDPRelayUpstream(c net.Conn) {
+	defer c.Close()
+
+	if _, err := socks5proto.ServerHandshake(c, socks5proto.NewServerSelector()); err != nil {
+		return
+	}
+	req, err := socks5proto.ReadRequest(c)
+	if err != nil || req.Cmd != socks5proto.CmdUDP {
+		return
+	}
+
+	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		return
+	}
+	defer pc.Close()
+
+	local := pc.LocalAddr().(*net.UDPAddr)
+	if err := socks5proto.NewReply(socks5proto.RepSucceeded, &socks5proto.Addr{
+		Host: local.IP.String(), Port: uint16(local.Port),
+	}).Write(c); err != nil {
+		return
+	}
+
+	// Keep the association alive until the client closes the control conn.
+	go func() {
+		io.Copy(io.Discard, c)
+		pc.Close()
+	}()
+
+	buf := make([]byte, udpBufferSize)
+	for {
+		n, client, err := pc.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		var dgram socks5proto.UDPDatagram
+		if err := dgram.Unmarshal(buf[:n]); err != nil {
+			continue
+		}
+		target, err := net.ResolveUDPAddr("udp", dgram.Header.Addr.String())
+		if err != nil {
+			continue
+		}
+
+		out, err := net.DialUDP("udp", nil, target)
+		if err != nil {
+			continue
+		}
+		out.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := out.Write(dgram.Data); err != nil {
+			out.Close()
+			continue
+		}
+		rbuf := make([]byte, udpBufferSize)
+		rn, err := out.Read(rbuf)
+		out.Close()
+		if err != nil {
+			continue
+		}
+
+		resp, err := socks5proto.NewUDPDatagram(
+			socks5proto.NewUDPHeader(0, 0, &socks5proto.Addr{Host: target.IP.String(), Port: uint16(target.Port)}),
+			rbuf[:rn],
+		).Marshal()
+		if err != nil {
+			continue
+		}
+		if _, err := pc.WriteToUDP(resp, client); err != nil {
+			return
+		}
+	}
+}
+
+func TestUDPAssociateViaUpstream(t *testing.T) {
+	setAuth("", "", false)
+	echo := startUDPEcho(t, "127.0.0.1")
+	upstream := startUDPRelayUpstream(t)
+
+	config.ForwardRequired = true
+	config.ForwardConfig.Scheme = "socks5"
+	config.ForwardConfig.BindAddr = upstream
+	config.ForwardConfig.Username = ""
+	config.ForwardConfig.Password = ""
+	t.Cleanup(func() {
+		config.ForwardRequired = false
+		config.ForwardConfig = config.Url{}
+	})
+
+	proxyAddr := startSocks5Proxy(t)
+	_, relay := udpAssociate(t, proxyAddr)
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+
+	target := &socks5proto.Addr{Host: echo.IP.String(), Port: uint16(echo.Port)}
+	payload := []byte("via-upstream")
+	got := udpRoundTrip(t, client, relay, target, payload)
+
+	if !bytes.Equal(got.Data, payload) {
+		t.Fatalf("payload=%q want %q", got.Data, payload)
+	}
+}
+
+func TestUDPAssociateUpstreamUnsupported(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = true
+	config.ForwardConfig.Scheme = "http"
+	config.ForwardConfig.BindAddr = "127.0.0.1:1"
+	t.Cleanup(func() {
+		config.ForwardRequired = false
+		config.ForwardConfig = config.Url{}
+	})
+
+	proxyAddr := startSocks5Proxy(t)
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	reqAddr := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "0.0.0.0", Port: 0}
+	var reqBuf bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdUDP, reqAddr).Write(&reqBuf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(reqBuf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if reply.Rep == socks5proto.RepSucceeded {
+		t.Fatal("expected failure for unsupported upstream UDP")
+	}
+}
+
 func TestMapDialErrorToRep(t *testing.T) {
 	cases := []struct {
 		name string
