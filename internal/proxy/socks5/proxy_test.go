@@ -523,6 +523,128 @@ func TestConnectFailureRepCode(t *testing.T) {
 	}
 }
 
+func TestBindTwoReplies(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+	proxyAddr := startSocks5Proxy(t)
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	bindReq := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "127.0.0.1", Port: 0}
+	var reqBuf bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdBind, bindReq).Write(&reqBuf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(reqBuf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	// First reply advertises the listener address.
+	first, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("first reply: %v", err)
+	}
+	if first.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("first reply rep=%d", first.Rep)
+	}
+	if first.Addr == nil || first.Addr.Port == 0 {
+		t.Fatal("first reply missing bind address")
+	}
+	if first.Addr.Host != "127.0.0.1" {
+		t.Fatalf("first reply host=%q", first.Addr.Host)
+	}
+
+	// The peer connects to the advertised address.
+	peer, err := net.DialTimeout("tcp", first.Addr.String(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("peer dial %s: %v", first.Addr, err)
+	}
+	defer peer.Close()
+	peer.SetDeadline(time.Now().Add(5 * time.Second))
+
+	// Second reply reports the peer's address.
+	second, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("second reply: %v", err)
+	}
+	if second.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("second reply rep=%d", second.Rep)
+	}
+	if second.Addr == nil {
+		t.Fatal("second reply missing peer address")
+	}
+	peerLocal := peer.LocalAddr().(*net.TCPAddr)
+	if second.Addr.Host != peerLocal.IP.String() || second.Addr.Port != uint16(peerLocal.Port) {
+		t.Fatalf("second reply addr=%s want %s", second.Addr, peerLocal)
+	}
+
+	// client -> peer
+	msg := []byte("bind-hello")
+	if _, err := conn.Write(msg); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len(msg))
+	if _, err := io.ReadFull(peer, got); err != nil {
+		t.Fatalf("peer read: %v", err)
+	}
+	if !bytes.Equal(got, msg) {
+		t.Fatalf("peer got %q want %q", got, msg)
+	}
+
+	// peer -> client
+	replyMsg := []byte("bind-world")
+	if _, err := peer.Write(replyMsg); err != nil {
+		t.Fatal(err)
+	}
+	got2 := make([]byte, len(replyMsg))
+	if _, err := io.ReadFull(conn, got2); err != nil {
+		t.Fatalf("client read: %v", err)
+	}
+	if !bytes.Equal(got2, replyMsg) {
+		t.Fatalf("client got %q want %q", got2, replyMsg)
+	}
+}
+
+func TestBindAbortOnControlClose(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	server, client := net.Pipe()
+	defer server.Close()
+
+	addr := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "127.0.0.1", Port: 0}
+	done := make(chan error, 1)
+	go func() { done <- handleBind(&server, addr) }()
+
+	reply, err := socks5proto.ReadReply(client)
+	if err != nil {
+		t.Fatalf("first reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("first reply rep=%d", reply.Rep)
+	}
+
+	client.Close()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleBind did not abort after control connection closed")
+	}
+}
+
 func TestMapDialErrorToRep(t *testing.T) {
 	cases := []struct {
 		name string
