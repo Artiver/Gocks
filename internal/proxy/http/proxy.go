@@ -7,7 +7,7 @@ import (
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	"gocks/internal/dialer"
-	"gocks/internal/netutil"
+	"gocks/internal/server"
 	"gocks/internal/tunnel"
 	"io"
 	"log"
@@ -19,70 +19,52 @@ import (
 
 // Run serves HTTP proxying until ctx is cancelled.
 func Run(ctx context.Context) error {
-	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
-	if err != nil {
-		return err
-	}
-	defer listen.Close()
-
-	go func() {
-		<-ctx.Done()
-		listen.Close()
-	}()
-
-	log.Println("HTTP proxy listening", config.ProxyConfig.BindAddr)
-
-	for {
-		conn, err := listen.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Println("Error accepting connection:", err)
-			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
-				return nil
-			}
-			continue
-		}
-
-		go HandleHTTPConnection(&conn, nil)
-	}
+	return server.Serve(ctx, "HTTP proxy", config.ProxyConfig.BindAddr, func(conn net.Conn) {
+		HandleHTTPConnection(conn, nil)
+	})
 }
 
-func HandleHTTPConnection(conn *net.Conn, firstBuff []byte) {
+// HandleHTTPConnection serves one client, reusing the connection for further
+// requests unless the request or the response says otherwise. firstBuff carries
+// the bytes the mixed-mode dispatcher pre-read to tell HTTP and SOCKS5 apart.
+func HandleHTTPConnection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
 		}
 	}()
-	if conn == nil {
-		return
-	}
-	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
+	defer func() {
+		if err := conn.Close(); err != nil {
 			log.Println("connection close error", err)
 		}
-	}(*conn)
+	}()
 
-	var reader io.Reader = *conn
-	if firstBuff != nil {
-		reader = tunnel.NewPrefixConn(firstBuff, *conn)
+	var reader io.Reader = conn
+	if len(firstBuff) > 0 {
+		reader = tunnel.NewPrefixConn(firstBuff, conn)
 	}
 	br := bufio.NewReader(reader)
 
 	for {
-		close, err := handleOneRequest(br, *conn)
+		shouldClose, err := handleOneRequest(br, conn)
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			if !isClientGone(err) {
 				log.Println("[HTTP]", err)
 			}
 			return
 		}
-		if close {
+		if shouldClose {
 			return
 		}
 	}
+}
+
+// isClientGone reports whether err is just the client closing the connection
+// rather than a proxying failure.
+func isClientGone(err error) bool {
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, net.ErrClosed)
 }
 
 func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
@@ -92,9 +74,6 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 
 	req, err := http.ReadRequest(br)
 	if err != nil {
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
-			return true, nil
-		}
 		return true, err
 	}
 	defer req.Body.Close()
@@ -103,14 +82,11 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 		return true, err
 	}
 
-	if config.ProxyConfig.AuthEnabled {
-		if !checkProxyAuthorizationFromHeader(req.Header) {
-			_, err := conn.Write(config.AuthRequiredResponse)
-			if err != nil {
-				log.Println("send 407 error:", err)
-			}
-			return true, nil
+	if auth := config.ProxyConfig.Auth; auth != nil && !checkProxyAuthorizationFromHeader(auth, req.Header) {
+		if _, err := conn.Write(config.AuthRequiredResponse); err != nil {
+			log.Println("send 407 error:", err)
 		}
+		return true, nil
 	}
 
 	if req.Method == constant.ConnectMethod {
@@ -119,57 +95,54 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 	return handleProxyMethod(conn, req)
 }
 
-func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
+// dialTarget resolves the target of req, defaulting to defaultPort when the
+// request carries no port, and connects to it. It answers 502 on failure.
+func dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn, string, error) {
 	addr := req.Host
 	if addr == "" && req.URL != nil {
 		addr = req.URL.Host
 	}
 	if !strings.Contains(addr, ":") {
-		addr += ":443"
+		addr += defaultPort
 	}
 
-	server, err := dialer.DialTcpConnection(addr)
+	upstream, err := dialer.DialTcpConnection(addr)
 	if err != nil {
 		log.Println(err)
-		conn.Write(config.BadGatewayResponse)
-		return true, err
-	}
-	defer server.Close()
-
-	clientAddr := conn.RemoteAddr().String()
-	log.Printf("[HTTP] %s <--> %s", clientAddr, addr)
-
-	if _, err = conn.Write(config.ConnectedResponse); err != nil {
-		return true, err
+		if _, werr := conn.Write(config.BadGatewayResponse); werr != nil {
+			log.Println("send 502 error:", werr)
+		}
+		return nil, addr, err
 	}
 
-	var wrappedConn net.Conn = tunnel.NewReaderConn(br, conn)
-	err = tunnel.TransportData(&server, &wrappedConn)
+	log.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
+	return upstream, addr, nil
+}
+
+func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
+	upstream, _, err := dialTarget(conn, req, ":443")
 	if err != nil {
+		return true, err
+	}
+	defer upstream.Close()
+
+	if _, err := conn.Write(config.ConnectedResponse); err != nil {
+		return true, err
+	}
+
+	// Replay anything the client sent after CONNECT before tunnelling.
+	if err := tunnel.TransportData(upstream, tunnel.NewReaderConn(br, conn)); err != nil {
 		log.Println("[HTTP]", err)
 	}
 	return true, nil
 }
 
 func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
-	addr := req.Host
-	if addr == "" && req.URL != nil {
-		addr = req.URL.Host
-	}
-	if !strings.Contains(addr, ":") {
-		addr += ":80"
-	}
-
-	server, err := dialer.DialTcpConnection(addr)
+	upstream, _, err := dialTarget(conn, req, ":80")
 	if err != nil {
-		log.Println(err)
-		conn.Write(config.BadGatewayResponse)
 		return true, err
 	}
-	defer server.Close()
-
-	clientAddr := conn.RemoteAddr().String()
-	log.Printf("[HTTP] %s <--> %s", clientAddr, addr)
+	defer upstream.Close()
 
 	req.Header.Del(constant.BasicAuthHeader)
 	req.Header.Del(constant.ProxyConnectKey)
@@ -181,12 +154,11 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 		req.RequestURI = req.URL.RequestURI()
 	}
 
-	if err := req.Write(server); err != nil {
+	if err := req.Write(upstream); err != nil {
 		return true, err
 	}
 
-	serverBr := bufio.NewReader(server)
-	resp, err := http.ReadResponse(serverBr, req)
+	resp, err := http.ReadResponse(bufio.NewReader(upstream), req)
 	if err != nil {
 		return true, err
 	}
@@ -194,13 +166,11 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 
 	resp.Header.Add(constant.ViaHeader, constant.ViaValue)
 
-	close := shouldCloseConnection(req, resp)
-
+	shouldClose := shouldCloseConnection(req, resp)
 	if err := resp.Write(conn); err != nil {
 		return true, err
 	}
-
-	return close, nil
+	return shouldClose, nil
 }
 
 func shouldCloseConnection(req *http.Request, resp *http.Response) bool {
@@ -210,8 +180,5 @@ func shouldCloseConnection(req *http.Request, resp *http.Response) bool {
 	if strings.EqualFold(req.Header.Get("Connection"), "close") {
 		return true
 	}
-	if resp.Close {
-		return true
-	}
-	return false
+	return resp.Close
 }

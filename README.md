@@ -15,8 +15,9 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
   - 按 RFC1928 进行方法协商与错误码返回
 - 混合代理（同一端口同时接受 HTTP 与 Socks5）
 - 上游 HTTP/Socks5 代理，支持多级代理链（多个 `-F`），每跳独立协议与认证
+- `-F` 对代理模式与 TCP 端口转发同样生效
 - UDP 关联经单级上游转发（多级链不支持 UDP）
-- 空闲超时、半关闭透传，SIGINT/SIGTERM 优雅退出
+- 空闲超时（5 分钟无数据即断开）、半关闭透传，SIGINT/SIGTERM 优雅退出
 
 # 目录
 
@@ -28,8 +29,10 @@ Gocks/
 │   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
 │   ├── protocol/socks5/           # SOCKS5 编解码与服务端握手
 │   │                              #   codec/method/auth/addr/request/reply/udp/server
-│   ├── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）
+│   ├── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）+ ReaderConn
 │   ├── netutil/                   # 网络小工具（可取消的 Sleep）
+│   ├── server/                    # 共用的 TCP accept 循环（优雅退出 + 退避重试）
+│   ├── testsupport/               # 测试桩（TCP echo / SOCKS5 上游 / TargetLog）
 │   ├── dialer/                    # 统一拨号入口（TCP/UDP 上游）
 │   ├── forward/                   # 上游代理拨号（forward.go 链式调度, http.go, socks5.go）
 │   ├── proxy/                     # 代理协议
@@ -37,7 +40,7 @@ Gocks/
 │   │   ├── socks5/                #   SOCKS5 代理（CONNECT/BIND/UDP）
 │   │   └── mix/                   #   混合代理
 │   └── transport/                 # 端口转发
-│       ├── tcp/
+│       ├── tcp/                   #   经 dialer 拨号，因此同样遵守 -F
 │       └── udp/
 ├── go.mod                         # module gocks
 └── Makefile                       # 构建路径 → ./cmd/gocks
@@ -64,7 +67,12 @@ Gocks_windows_amd64.exe -L tcp://192.168.100.1:8181/192.168.134.1:8080
 
 # UDP端口转发，监听192.168.100.1:8181，将数据包转发到192.168.134.1:8080
 Gocks_windows_amd64.exe -L udp://192.168.100.1:8181/192.168.134.1:8080
+
+# TCP端口转发也可以经过上游代理链（与代理模式一致）
+Gocks_windows_amd64.exe -L tcp://:8181/10.0.0.5:3389 -F socks5://192.168.200.1:1080
 ```
+
+UDP 端口转发为直连转发（每次请求新建一个上游 socket，等待响应 3 秒），不支持 `-F`。
 
 ## 代理转发
 

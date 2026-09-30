@@ -16,7 +16,7 @@ import (
 // hop carries credentials.
 func socks5ClientHandshake(conn net.Conn, hop config.Url) error {
 	methods := []byte{socks5proto.MethodNoAuth}
-	if hop.Username != "" || hop.Password != "" {
+	if hop.Auth != nil {
 		methods = append(methods, socks5proto.MethodUserPass)
 	}
 
@@ -45,13 +45,13 @@ func socks5ClientHandshake(conn net.Conn, hop config.Url) error {
 		return nil
 
 	case socks5proto.MethodUserPass:
-		if hop.Username == "" && hop.Password == "" {
+		if hop.Auth == nil {
 			return errors.New("socks5: upstream requires authentication but none is configured")
 		}
 		req := socks5proto.NewUserPassRequest(
 			socks5proto.UserPassVersion,
-			hop.Username,
-			hop.Password,
+			hop.Auth.Username,
+			hop.Auth.Password,
 		)
 		if err := req.Write(conn); err != nil {
 			return err

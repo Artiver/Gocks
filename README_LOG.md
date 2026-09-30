@@ -1,3 +1,61 @@
+# 2026.10.1
+
+代码精简重构，目标是消除「同一个决定写在多处」，每步后 `go build ./... && go vet ./... && go test ./...` 全绿。
+
+## 删除死代码
+- `proxy/http/auth.go`：`parseHeaders` / `checkProxyAuthorization`（旧的手写头部解析，无调用方），
+  连带删除 `config.CRLF`
+- `protocol/socks5`：`UserPassRequest.String`、`UserPassResponse.String`、`Request.String`、
+  `Reply.String`、`UDPHeader.String` 五个无人调用的 `String()`
+- `tunnel`：`FormatAddress`（无调用方）、`TransportDataContext`（生产走 `TransportDataStats`）
+- `constant`：`CR`、`Socks5HandleBytes`、`MaxHeaderBytes`、`ProxyAgentHeader/Value`、`UdpReadBytes`
+- `config`：`GatewayTimeoutResponse`（原名「备用」，实际从未接线）
+- `protocol/socks5`：整条 `io.Reader/io.Writer` 流式编解码链（`Addr.ReadFrom/WriteTo`、
+  `UDPHeader.ReadFrom/WriteTo`、`UDPDatagram.ReadFrom/WriteTo`）。生产路径只用
+  字节切片版本（`Encode/Decode/Marshal/Unmarshal`），流式版本只有自己的单测在用，
+  其中 `UDPDatagram.ReadFrom` 还带着未使用的 gost UDP-over-TCP 扩展。
+  保留 `Addr.readBody`——`ReadRequest/ReadReply` 的精确分帧依赖它
+
+## 消除重复
+- 新增 `internal/server`：`Serve` / `ServeListener` 统一了 4 份逐字节相同的
+  listen/accept/退避/优雅退出循环（socks5、http、mix、transport/tcp），
+  并新增单测覆盖取消退出与 listen 失败
+- `tunnel.ReaderConn` 与 `PrefixConn` 合并：`NewPrefixConn` 现在只是
+  `NewReaderConn(io.MultiReader(bytes.NewReader(prefix), conn), conn)`，
+  少一份 15 个 net.Conn 方法的转发样板
+- `udpRelay`：`runDirect` / `runUpstream` 共用的客户端收包前奏（deadline、源 IP 过滤、
+  解包、FRAG 校验）抽成 `readClient`
+- `handleUDPAssociate`：5 处「回失败响应 + 关控制连接」模板收敛为 `failReply` + `defer`
+- `proxy/socks5`：`writeReply` / `writeBndReply` / `writeBindReply` 三个回包工具合并为一个
+- `proxy/http`：CONNECT 与普通代理的「补默认端口 → 拨号 → 502 → 日志」前奏抽成 `dialTarget`；
+  EOF 过滤从两处收敛到 `isClientGone`
+- 新增 `internal/testsupport`：测试用 SOCKS5 上游原本有 4 份独立实现，TCP echo 有 3 份；
+  现在统一为 `Socks5Upstream(opts)` / `TCPEcho` / `SilentListener` / `ClosedAddr` /
+  `TargetLog.Assert` / `AssertEcho` / `TCPServer`
+
+## 消除冗余状态
+- `config.Url` 的 `AuthInfo` 内嵌 + `AuthEnabled bool` + `HttpAuthHeader http.Header`
+  三套认证表示合并为 `Auth *Auth`（nil 即不认证），`Auth.ProxyAuthorization()` 按需生成
+  头部，不再需要手工同步 `AuthEnabled`
+- 默认端口不再用 `strings.Contains(host, ".")` 猜：改用 `net.SplitHostPort`，
+  顺带修掉 `localhost` 这类无点主机名被解析成无端口地址的问题
+- 连接句柄从 `*net.Conn` 改回 `net.Conn`：`(*conn)` / `&conn` 是没有用途的间接层
+
+## 顺带修复
+- TCP 端口转发改为经 `dialer.DialTcpConnection` 拨号，因此 `-F` 上游链生效
+  （此前只有 socks5/http 代理遵守 `-F`）
+- UDP 端口转发：读缓冲移出循环并放大到 65535，报文不再被截断；每包复制后再交给
+  goroutine，避免复用缓冲导致的数据竞争
+- TCP 端口转发：`defer src.Close()` 与错误判断顺序修正，成功日志在传输前打印
+- mix 分发：预读失败时关闭连接（此前泄漏），并用 `socks5proto.Version` 取代魔数 `0x05`
+- `constant.IdleTimeout` 注释写明它同时作用于数据中继（空闲 5 分钟断开）
+
+## 结果
+- 应用代码 3022 → 2830 行（−192，−6.4%，未含新增的 `internal/server` 50 行与
+  `internal/testsupport` 244 行）
+- 测试代码（含新抽取的 `testsupport`）3679 → 3459 行（−220，−6.0%）
+- 合计 6701 → 6289 行（−412，−6.1%）；`go test -race ./...` 全部通过
+
 # 2026.9.30
 
 参考 gost 重写 SOCKS5 实现，按阶段提交，每个阶段附带单元测试。

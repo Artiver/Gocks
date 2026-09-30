@@ -93,14 +93,14 @@ func TestBuildForwardChainKeepsDialOrder(t *testing.T) {
 	if chain[0].Scheme != constant.Socks5 || chain[0].BindAddr != "near.example:1080" {
 		t.Fatalf("hop[0]=%+v", chain[0])
 	}
-	if !chain[0].AuthEnabled || chain[0].Username != "user" || chain[0].Password != "pass" {
-		t.Fatalf("hop[0] credentials=%+v", chain[0].AuthInfo)
+	if chain[0].Auth == nil || chain[0].Auth.Username != "user" || chain[0].Auth.Password != "pass" {
+		t.Fatalf("hop[0] credentials=%+v", chain[0].Auth)
 	}
 	if chain[1].Scheme != constant.HTTP || chain[1].BindAddr != "far.example:8080" {
 		t.Fatalf("hop[1]=%+v", chain[1])
 	}
-	if chain[1].AuthEnabled {
-		t.Fatalf("hop[1] should not carry credentials: %+v", chain[1].AuthInfo)
+	if chain[1].Auth != nil {
+		t.Fatalf("hop[1] should not carry credentials: %+v", chain[1].Auth)
 	}
 }
 

@@ -1,7 +1,6 @@
 package socks5
 
 import (
-	"fmt"
 	"io"
 )
 
@@ -59,12 +58,4 @@ func (req *Request) Write(w io.Writer) error {
 	}
 	_, err := w.Write(buf)
 	return err
-}
-
-func (req *Request) String() string {
-	addr := req.Addr
-	if addr == nil {
-		addr = &Addr{}
-	}
-	return fmt.Sprintf("%d %d %s", Version, req.Cmd, addr.String())
 }

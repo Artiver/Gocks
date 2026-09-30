@@ -45,18 +45,8 @@ func (addr *Addr) ParseFrom(saddr string) error {
 	return nil
 }
 
-// ReadFrom reads ATYP followed by the address body.
-func (addr *Addr) ReadFrom(r io.Reader) (int64, error) {
-	var atyp [1]byte
-	if _, err := io.ReadFull(r, atyp[:]); err != nil {
-		return 0, err
-	}
-	addr.Type = atyp[0]
-	n, err := addr.readBody(r)
-	return n + 1, err
-}
-
-// readBody reads the address body for the already-set Type (no ATYP).
+// readBody reads the address body for the already-set Type (no ATYP). It is
+// shared by the request and reply decoders.
 func (addr *Addr) readBody(r io.Reader) (int64, error) {
 	var n int64
 
@@ -100,17 +90,6 @@ func (addr *Addr) readBody(r io.Reader) (int64, error) {
 	}
 	addr.Port = binary.BigEndian.Uint16(port[:])
 	return n + 2, nil
-}
-
-// WriteTo writes ATYP followed by the address body.
-func (addr *Addr) WriteTo(w io.Writer) (int64, error) {
-	buf := make([]byte, addr.Length())
-	n, err := addr.Encode(buf)
-	if err != nil {
-		return int64(n), err
-	}
-	nn, err := w.Write(buf[:n])
-	return int64(nn), err
 }
 
 // Decode parses an address from b and returns the number of bytes consumed.

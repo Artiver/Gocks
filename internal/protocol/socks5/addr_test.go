@@ -29,23 +29,15 @@ func TestAddrRoundTrip(t *testing.T) {
 			}
 
 			var got Addr
-			if _, err := got.ReadFrom(bytes.NewReader(buf[:n])); err != nil {
-				t.Fatalf("ReadFrom: %v", err)
-			}
-			if got.Type != tc.addr.Type || got.Host != tc.addr.Host || got.Port != tc.addr.Port {
-				t.Fatalf("round trip mismatch: got %+v want %+v", got, tc.addr)
-			}
-
-			var dec Addr
-			dn, err := dec.Decode(buf[:n])
+			dn, err := got.Decode(buf[:n])
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
 			if dn != n {
 				t.Fatalf("Decode consumed %d, want %d", dn, n)
 			}
-			if dec.Host != tc.addr.Host || dec.Port != tc.addr.Port {
-				t.Fatalf("decode mismatch: got %+v want %+v", dec, tc.addr)
+			if got.Type != tc.addr.Type || got.Host != tc.addr.Host || got.Port != tc.addr.Port {
+				t.Fatalf("round trip mismatch: got %+v want %+v", got, tc.addr)
 			}
 		})
 	}
@@ -122,12 +114,12 @@ func TestAddrDecodeBadType(t *testing.T) {
 	}
 }
 
-func TestAddrReadFromDomainEmpty(t *testing.T) {
+func TestAddrDecodeDomainEmpty(t *testing.T) {
 	// ATYP=domain, length=0, port=80.
 	wire := []byte{AddrDomain, 0x00, 0x00, 0x50}
 	var addr Addr
-	if _, err := addr.ReadFrom(bytes.NewReader(wire)); err != nil {
-		t.Fatalf("ReadFrom: %v", err)
+	if _, err := addr.Decode(wire); err != nil {
+		t.Fatalf("Decode: %v", err)
 	}
 	if addr.Type != AddrDomain || addr.Host != "" || addr.Port != 80 {
 		t.Fatalf("unexpected addr: %+v", addr)
@@ -135,17 +127,22 @@ func TestAddrReadFromDomainEmpty(t *testing.T) {
 }
 
 func TestAddrFragmented(t *testing.T) {
+	// The address body is read through readBody by the request and reply
+	// decoders, so a reader that hands over one byte at a time must still
+	// produce a complete address.
 	addr := &Addr{Type: AddrDomain, Host: "fragmented.example", Port: 53}
 	buf := make([]byte, addr.Length())
 	n, err := addr.Encode(buf)
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	var got Addr
-	if _, err := got.ReadFrom(&oneByteReader{data: buf[:n]}); err != nil {
-		t.Fatalf("ReadFrom fragmented: %v", err)
+	wire := append([]byte{Version, CmdConnect, 0x00}, buf[:n]...)
+
+	req, err := ReadRequest(&oneByteReader{data: wire})
+	if err != nil {
+		t.Fatalf("ReadRequest fragmented: %v", err)
 	}
-	if got.Host != addr.Host || got.Port != addr.Port {
-		t.Fatalf("got %+v want %+v", got, addr)
+	if req.Addr.Host != addr.Host || req.Addr.Port != addr.Port {
+		t.Fatalf("got %+v want %+v", req.Addr, addr)
 	}
 }

@@ -1,176 +1,23 @@
 package dialer
 
 import (
-	"io"
-	"net"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"gocks/internal/config"
 	"gocks/internal/constant"
-	socks5proto "gocks/internal/protocol/socks5"
+	"gocks/internal/testsupport"
 )
 
-func startEcho(t *testing.T) string {
+// startRelay runs a SOCKS5 upstream that connects to the requested target, so
+// it can stand in for any hop of a chain. It records the targets it was asked
+// for.
+func startRelay(t *testing.T) (string, *testsupport.TargetLog) {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				io.Copy(c, c)
-			}(c)
-		}
-	}()
-
-	return ln.Addr().String()
-}
-
-func assertEcho(t *testing.T, conn net.Conn, msg string) {
-	t.Helper()
-
-	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := conn.Write([]byte(msg)); err != nil {
-		t.Fatal(err)
-	}
-	got := make([]byte, len(msg))
-	if _, err := io.ReadFull(conn, got); err != nil {
-		t.Fatalf("read echo: %v", err)
-	}
-	if string(got) != msg {
-		t.Fatalf("echo=%q want %q", got, msg)
-	}
-}
-
-// startRelay runs a SOCKS5 server that connects to the requested target, so it
-// can stand in for any hop of a chain. It records the targets it was asked for.
-func startRelay(t *testing.T) (string, *targetLog) {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	log := &targetLog{}
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go serveRelay(c, log)
-		}
-	}()
-
-	return ln.Addr().String(), log
-}
-
-type targetLog struct {
-	mu      sync.Mutex
-	targets []string
-}
-
-func (l *targetLog) add(target string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.targets = append(l.targets, target)
-}
-
-func (l *targetLog) snapshot() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]string(nil), l.targets...)
-}
-
-func serveRelay(c net.Conn, log *targetLog) {
-	defer c.Close()
-
-	if _, err := socks5proto.ServerHandshake(c, socks5proto.NewServerSelector()); err != nil {
-		return
-	}
-	req, err := socks5proto.ReadRequest(c)
-	if err != nil {
-		return
-	}
-	if req.Cmd != socks5proto.CmdConnect || req.Addr == nil {
-		socks5proto.NewReply(socks5proto.RepCmdUnsupported, nil).Write(c)
-		return
-	}
-
-	target := req.Addr.String()
-	log.add(target)
-
-	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
-	if err != nil {
-		socks5proto.NewReply(socks5proto.RepHostUnreachable, nil).Write(c)
-		return
-	}
-	defer upstream.Close()
-
-	reply := socks5proto.NewReply(socks5proto.RepSucceeded, nil)
-	if bound, err := socks5proto.NewAddr(upstream.LocalAddr().String()); err == nil {
-		reply.Addr = bound
-	}
-	if err := reply.Write(c); err != nil {
-		return
-	}
-
-	done := make(chan struct{}, 2)
-	go func() { io.Copy(upstream, c); done <- struct{}{} }()
-	go func() { io.Copy(c, upstream); done <- struct{}{} }()
-	<-done
-}
-
-// startUDPAssociateStub answers a SOCKS5 UDP ASSOCIATE with a fixed relay
-// address and keeps the control connection open.
-func startUDPAssociateStub(t *testing.T) string {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				if _, err := socks5proto.ServerHandshake(c, socks5proto.NewServerSelector()); err != nil {
-					return
-				}
-				if _, err := socks5proto.ReadRequest(c); err != nil {
-					return
-				}
-				socks5proto.NewReply(socks5proto.RepSucceeded, &socks5proto.Addr{
-					Type: socks5proto.AddrIPv4, Host: "127.0.0.1", Port: 12345,
-				}).Write(c)
-				io.Copy(io.Discard, c)
-			}(c)
-		}
-	}()
-
-	return ln.Addr().String()
+	log := &testsupport.TargetLog{}
+	addr := testsupport.Socks5Upstream(t, testsupport.Socks5Options{Log: log})
+	return addr, log
 }
 
 func setChain(t *testing.T, hops ...config.Url) {
@@ -188,29 +35,29 @@ func socks5Hop(bindAddr string) config.Url {
 func TestDialTcpConnectionDirect(t *testing.T) {
 	setChain(t)
 
-	target := startEcho(t)
+	target := testsupport.TCPEcho(t)
 	conn, err := DialTcpConnection(target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "direct")
+	testsupport.AssertEcho(t, conn, "direct")
 }
 
 func TestDialTcpConnectionSingleHop(t *testing.T) {
 	relay, log := startRelay(t)
 	setChain(t, socks5Hop(relay))
 
-	target := startEcho(t)
+	target := testsupport.TCPEcho(t)
 	conn, err := DialTcpConnection(target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "single-hop")
-	assertTargets(t, log, target)
+	testsupport.AssertEcho(t, conn, "single-hop")
+	log.Assert(t, target)
 }
 
 func TestDialTcpConnectionTwoHops(t *testing.T) {
@@ -218,18 +65,18 @@ func TestDialTcpConnectionTwoHops(t *testing.T) {
 	near, nearLog := startRelay(t)
 	setChain(t, socks5Hop(near), socks5Hop(far))
 
-	target := startEcho(t)
+	target := testsupport.TCPEcho(t)
 	conn, err := DialTcpConnection(target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "two-hops-through-dialer")
+	testsupport.AssertEcho(t, conn, "two-hops-through-dialer")
 
 	// The near hop forwards to the far hop; only the far hop sees the target.
-	assertTargets(t, nearLog, far)
-	assertTargets(t, farLog, target)
+	nearLog.Assert(t, far)
+	farLog.Assert(t, target)
 }
 
 func TestDialUdpAssociationDirect(t *testing.T) {
@@ -245,7 +92,7 @@ func TestDialUdpAssociationDirect(t *testing.T) {
 }
 
 func TestDialUdpAssociationSingleSocks5Hop(t *testing.T) {
-	hop := startUDPAssociateStub(t)
+	hop := testsupport.Socks5Upstream(t, testsupport.Socks5Options{})
 	setChain(t, socks5Hop(hop))
 
 	control, relay, err := DialUdpAssociation()
@@ -282,19 +129,5 @@ func TestDialUdpAssociationRejectsMultiHopChain(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "more than one hop") {
 		t.Fatalf("error=%q should explain the chain limit", err)
-	}
-}
-
-func assertTargets(t *testing.T, log *targetLog, want ...string) {
-	t.Helper()
-
-	got := log.snapshot()
-	if len(got) != len(want) {
-		t.Fatalf("relay targets=%v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("relay target[%d]=%q want %q", i, got[i], want[i])
-		}
 	}
 }

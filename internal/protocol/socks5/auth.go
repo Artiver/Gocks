@@ -1,7 +1,6 @@
 package socks5
 
 import (
-	"fmt"
 	"io"
 )
 
@@ -80,10 +79,6 @@ func (req *UserPassRequest) Write(w io.Writer) error {
 	return err
 }
 
-func (req *UserPassRequest) String() string {
-	return fmt.Sprintf("%d %s:%s", req.Version, req.Username, req.Password)
-}
-
 // UserPassResponse is the username/password authentication reply:
 //
 //	+----+--------+
@@ -120,8 +115,4 @@ func ReadUserPassResponse(r io.Reader) (*UserPassResponse, error) {
 func (res *UserPassResponse) Write(w io.Writer) error {
 	_, err := w.Write([]byte{res.Version, res.Status})
 	return err
-}
-
-func (res *UserPassResponse) String() string {
-	return fmt.Sprintf("%d %d", res.Version, res.Status)
 }

@@ -18,11 +18,17 @@ func dialHTTPHop(conn net.Conn, hop config.Url, address string) error {
 		return err
 	}
 
+	header := http.Header{}
+	header.Set(constant.ProxyConnectKey, constant.ProxyConnectValue)
+	if hop.Auth != nil {
+		header.Set(constant.BasicAuthHeader, hop.Auth.ProxyAuthorization())
+	}
+
 	req := &http.Request{
 		Method: constant.ConnectMethod,
 		URL:    &url.URL{Host: address},
 		Host:   address,
-		Header: hop.HttpAuthHeader,
+		Header: header,
 	}
 	if err := req.Write(conn); err != nil {
 		return err

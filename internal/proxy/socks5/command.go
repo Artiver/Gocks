@@ -16,12 +16,12 @@ import (
 	"time"
 )
 
-func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
+func handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 	targetAddr := addr.String()
 	targetConn, err := dialer.DialTcpConnection(targetAddr)
 
 	if err != nil {
-		if err1 := writeReply(conn, mapDialErrorToRep(err)); err1 != nil {
+		if err1 := writeReply(conn, mapDialErrorToRep(err), nil); err1 != nil {
 			return err1
 		}
 		return err
@@ -33,7 +33,7 @@ func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
 		}
 	}(targetConn)
 
-	clientAddr := (*conn).RemoteAddr().String()
+	clientAddr := conn.RemoteAddr().String()
 	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
 	// RFC 1928 §6: report the address the server used to reach the target.
@@ -42,7 +42,7 @@ func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
 	}
 
 	start := time.Now()
-	stats, err := tunnel.TransportDataStats(&targetConn, conn)
+	stats, err := tunnel.TransportDataStats(targetConn, conn)
 	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
 		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
 	return err
@@ -85,6 +85,15 @@ func mapDialErrorToRep(err error) byte {
 	}
 }
 
+// failReply reports a generic failure to the client and returns err, unless the
+// reply itself could not be delivered.
+func failReply(conn net.Conn, err error) error {
+	if werr := writeReply(conn, socks5proto.RepFailure, nil); werr != nil {
+		return werr
+	}
+	return err
+}
+
 // bindWaitTimeout bounds how long BIND waits for the incoming connection.
 const bindWaitTimeout = 2 * time.Minute
 
@@ -92,13 +101,10 @@ const bindWaitTimeout = 2 * time.Minute
 // while BIND was waiting for the peer.
 var errBindControlClosed = errors.New("bind: control connection closed")
 
-func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {
+func handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 	listener, err := net.Listen(bindNetwork(addr), addr.String())
 	if err != nil {
-		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-			return werr
-		}
-		return err
+		return failReply(conn, err)
 	}
 	defer listener.Close()
 
@@ -107,16 +113,16 @@ func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {
 	}
 
 	// First reply: the address the client should tell the peer to connect to.
-	if err := writeBindReply(*conn, bindAddr(listener, *conn)); err != nil {
+	if err := writeReply(conn, socks5proto.RepSucceeded, bindAddr(listener, conn)); err != nil {
 		return err
 	}
 
-	clientAddr := (*conn).RemoteAddr().String()
+	clientAddr := conn.RemoteAddr().String()
 	log.Printf("[SOCKS5] [BIND] %s listening on %s", clientAddr, listener.Addr())
 
 	// Watch the control connection for an early client disconnect while the
 	// peer is awaited. Peek never consumes, so any buffered data is relayed.
-	br := bufio.NewReader(*conn)
+	br := bufio.NewReader(conn)
 	controlClosed := make(chan error, 1)
 	watcherDone := make(chan struct{})
 	go func() {
@@ -138,35 +144,32 @@ func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {
 
 	targetConn, err := waitForPeer(listener, acceptCh, acceptErrCh, controlClosed)
 	if err != nil {
-		if !errors.Is(err, errBindControlClosed) {
-			if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-				return werr
-			}
+		if errors.Is(err, errBindControlClosed) {
+			return err
 		}
-		return err
+		return failReply(conn, err)
 	}
 	defer targetConn.Close()
 
 	// Stop the watcher before relaying: bufio.Reader is not safe for
 	// concurrent use, and we must reclaim the read deadline.
-	if err := (*conn).SetReadDeadline(time.Now()); err != nil {
+	if err := conn.SetReadDeadline(time.Now()); err != nil {
 		return err
 	}
 	<-watcherDone
-	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		return err
 	}
 
 	// Second reply: the address of the connecting peer (RFC 1928 §6).
-	if err := writeBindReply(*conn, peerAddr(targetConn)); err != nil {
+	if err := writeReply(conn, socks5proto.RepSucceeded, peerAddr(targetConn)); err != nil {
 		return err
 	}
 
 	log.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetConn.RemoteAddr())
 
-	var wrapped net.Conn = tunnel.NewReaderConn(br, *conn)
 	start := time.Now()
-	stats, err := tunnel.TransportDataStats(&targetConn, &wrapped)
+	stats, err := tunnel.TransportDataStats(targetConn, tunnel.NewReaderConn(br, conn))
 	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
 		clientAddr, targetConn.RemoteAddr(), time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
 	return err
@@ -241,20 +244,16 @@ func peerAddr(conn net.Conn) *socks5proto.Addr {
 	return &socks5proto.Addr{Host: tcpAddr.IP.String(), Port: uint16(tcpAddr.Port)}
 }
 
-func writeBindReply(w net.Conn, addr *socks5proto.Addr) error {
-	return socks5proto.NewReply(socks5proto.RepSucceeded, addr).Write(w)
-}
-
 // udpBufferSize is large enough for any UDP payload plus the SOCKS5 header.
 const udpBufferSize = 65535
 
 // handleUDPAssociate implements RFC 1928 §7: it binds a client-facing UDP
 // socket and relays datagrams between the client and one upstream socket per
 // target, until the TCP control connection closes or the relay goes idle.
-func handleUDPAssociate(conn *net.Conn) error {
+func handleUDPAssociate(conn net.Conn) error {
 	// Bind on the interface the client reached us on so that replies carry a
 	// source address the client will accept (RFC 1928 §6).
-	tcpLocal, ok := (*conn).LocalAddr().(*net.TCPAddr)
+	tcpLocal, ok := conn.LocalAddr().(*net.TCPAddr)
 	bindIP := net.IPv4zero
 	if ok && tcpLocal.IP != nil {
 		bindIP = tcpLocal.IP
@@ -262,10 +261,7 @@ func handleUDPAssociate(conn *net.Conn) error {
 
 	clientConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: bindIP})
 	if err != nil {
-		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-			return werr
-		}
-		return err
+		return failReply(conn, err)
 	}
 	defer clientConn.Close()
 
@@ -273,31 +269,21 @@ func handleUDPAssociate(conn *net.Conn) error {
 	// This happens before the success reply so a failure is reported properly.
 	control, relayAddr, err := dialer.DialUdpAssociation()
 	if err != nil {
-		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-			return werr
-		}
-		return err
+		return failReply(conn, err)
 	}
 	var upstreamConn *net.UDPConn
 	if control != nil {
+		defer control.Close()
+
 		upAddr, err := net.ResolveUDPAddr("udp", relayAddr.String())
 		if err != nil {
-			control.Close()
-			if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-				return werr
-			}
-			return err
+			return failReply(conn, err)
 		}
 		upstreamConn, err = net.DialUDP("udp", nil, upAddr)
 		if err != nil {
-			control.Close()
-			if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
-				return werr
-			}
-			return err
+			return failReply(conn, err)
 		}
 		defer upstreamConn.Close()
-		defer control.Close()
 	}
 
 	bound := clientConn.LocalAddr().(*net.UDPAddr)
@@ -305,22 +291,22 @@ func handleUDPAssociate(conn *net.Conn) error {
 	if bindIP.IsUnspecified() && ok && tcpLocal.IP != nil {
 		replyHost = tcpLocal.IP.String()
 	}
-	if err := socks5proto.NewReply(socks5proto.RepSucceeded, &socks5proto.Addr{
+	if err := writeReply(conn, socks5proto.RepSucceeded, &socks5proto.Addr{
 		Host: replyHost,
 		Port: uint16(bound.Port),
-	}).Write(*conn); err != nil {
+	}); err != nil {
 		return err
 	}
 
 	clientIP := net.IPv4zero
-	if remote, ok := (*conn).RemoteAddr().(*net.TCPAddr); ok {
+	if remote, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		clientIP = remote.IP
 	}
 	if upstreamConn != nil {
 		log.Printf("[SOCKS5] [UDP] %s relay on %s via upstream %s",
-			(*conn).RemoteAddr(), bound, upstreamConn.RemoteAddr())
+			conn.RemoteAddr(), bound, upstreamConn.RemoteAddr())
 	} else {
-		log.Printf("[SOCKS5] [UDP] %s relay on %s", (*conn).RemoteAddr(), bound)
+		log.Printf("[SOCKS5] [UDP] %s relay on %s", conn.RemoteAddr(), bound)
 	}
 
 	// The association lives as long as the TCP control connection.
@@ -329,7 +315,7 @@ func handleUDPAssociate(conn *net.Conn) error {
 	go func() {
 		var b [1]byte
 		for {
-			if _, err := (*conn).Read(b[:]); err != nil {
+			if _, err := conn.Read(b[:]); err != nil {
 				cancel()
 				return
 			}
@@ -356,6 +342,14 @@ func handleUDPAssociate(conn *net.Conn) error {
 type udpSession struct {
 	conn   *net.UDPConn
 	client *net.UDPAddr
+}
+
+// clientPacket is one datagram received from the client, in both its raw and
+// parsed form.
+type clientPacket struct {
+	wire  []byte
+	dgram *socks5proto.UDPDatagram
+	src   *net.UDPAddr
 }
 
 // udpRelay fans client datagrams out to per-target upstream sockets (direct)
@@ -392,40 +386,25 @@ func (r *udpRelay) runDirect(ctx context.Context) {
 		default:
 		}
 
-		if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
-			return
-		}
-		n, src, err := r.clientConn.ReadFromUDP(buf)
+		packet, err := r.readClient(buf)
 		if err != nil {
 			return
 		}
-		// RFC 1928 §7: only accept datagrams from the client that owns the
-		// TCP control connection.
-		if !src.IP.Equal(r.clientIP) {
+		if packet == nil {
 			continue
 		}
 
-		var dgram socks5proto.UDPDatagram
-		if err := dgram.Unmarshal(buf[:n]); err != nil {
-			log.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
-			continue
-		}
-		if dgram.Header.Frag != 0 {
-			// Fragmentation is not supported.
-			continue
-		}
-
-		target, err := net.ResolveUDPAddr("udp", dgram.Header.Addr.String())
+		target, err := net.ResolveUDPAddr("udp", packet.dgram.Header.Addr.String())
 		if err != nil {
-			log.Printf("[SOCKS5] [UDP] resolve %s: %v", dgram.Header.Addr, err)
+			log.Printf("[SOCKS5] [UDP] resolve %s: %v", packet.dgram.Header.Addr, err)
 			continue
 		}
 
-		session := r.session(src, target)
+		session := r.session(packet.src, target)
 		if session == nil {
 			continue
 		}
-		if _, err := session.conn.Write(dgram.Data); err != nil {
+		if _, err := session.conn.Write(packet.dgram.Data); err != nil {
 			log.Printf("[SOCKS5] [UDP] forward to %s: %v", target, err)
 		}
 	}
@@ -472,34 +451,53 @@ func (r *udpRelay) runUpstream(ctx context.Context) {
 		default:
 		}
 
-		if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
-			return
-		}
-		n, src, err := r.clientConn.ReadFromUDP(buf)
+		packet, err := r.readClient(buf)
 		if err != nil {
 			return
 		}
-		if !src.IP.Equal(r.clientIP) {
-			continue
-		}
-
-		var dgram socks5proto.UDPDatagram
-		if err := dgram.Unmarshal(buf[:n]); err != nil {
-			log.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
-			continue
-		}
-		if dgram.Header.Frag != 0 {
+		if packet == nil {
 			continue
 		}
 
 		r.mu.Lock()
-		r.clientAddr = src
+		r.clientAddr = packet.src
 		r.mu.Unlock()
 
-		if _, err := r.upstreamConn.Write(buf[:n]); err != nil {
+		if _, err := r.upstreamConn.Write(packet.wire); err != nil {
 			return
 		}
 	}
+}
+
+// readClient waits for the next usable datagram from the client that owns the
+// TCP control connection. A nil packet with a nil error means the datagram was
+// ignored (wrong source address, malformed, or fragmented) and the caller
+// should keep relaying; a non-nil error means the relay must stop. wire aliases
+// buf.
+func (r *udpRelay) readClient(buf []byte) (*clientPacket, error) {
+	if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+		return nil, err
+	}
+	n, src, err := r.clientConn.ReadFromUDP(buf)
+	if err != nil {
+		return nil, err
+	}
+	// RFC 1928 §7: only accept datagrams from the client that owns the TCP
+	// control connection.
+	if !src.IP.Equal(r.clientIP) {
+		return nil, nil
+	}
+
+	dgram := &socks5proto.UDPDatagram{}
+	if err := dgram.Unmarshal(buf[:n]); err != nil {
+		log.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
+		return nil, nil
+	}
+	if dgram.Header.Frag != 0 {
+		// Fragmentation is not supported.
+		return nil, nil
+	}
+	return &clientPacket{wire: buf[:n], dgram: dgram, src: src}, nil
 }
 
 func (r *udpRelay) session(client, target *net.UDPAddr) *udpSession {

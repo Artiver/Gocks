@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"gocks/internal/config"
+	"gocks/internal/testsupport"
 	"gocks/internal/tunnel"
 	"io"
 	"net"
@@ -16,32 +17,20 @@ import (
 	"time"
 )
 
-func startProxy(t *testing.T, auth bool) (string, func()) {
+// startProxy serves the HTTP proxy on loopback and returns its address.
+func startProxy(t *testing.T, auth bool) string {
+	t.Helper()
+
 	if auth {
-		config.ProxyConfig.Username = "testuser"
-		config.ProxyConfig.Password = "testpass"
-		config.ProxyConfig.AuthEnabled = true
+		config.ProxyConfig.Auth = &config.Auth{Username: "testuser", Password: "testpass"}
 	} else {
-		config.ProxyConfig.AuthEnabled = false
+		config.ProxyConfig.Auth = nil
 	}
 	config.ForwardChain = nil
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go HandleHTTPConnection(&conn, nil)
-		}
-	}()
-
-	return ln.Addr().String(), func() { ln.Close() }
+	return testsupport.TCPServer(t, func(conn net.Conn) {
+		HandleHTTPConnection(conn, nil)
+	})
 }
 
 func dialThroughProxy(t *testing.T, proxyAddr, targetURL, proxyAuth string) (*http.Response, string) {
@@ -86,8 +75,7 @@ func TestProxyBasicHTTP(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, false)
-	defer stop()
+	proxyAddr := startProxy(t, false)
 
 	resp, body := dialThroughProxy(t, proxyAddr, backend.URL, "")
 	if resp.StatusCode != 200 {
@@ -106,8 +94,7 @@ func TestProxyKeepAlive(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, false)
-	defer stop()
+	proxyAddr := startProxy(t, false)
 
 	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
 	if err != nil {
@@ -150,8 +137,7 @@ func TestProxyConnectTunnel(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, false)
-	defer stop()
+	proxyAddr := startProxy(t, false)
 
 	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
 	if err != nil {
@@ -204,8 +190,7 @@ func TestProxyAuthRequired(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, true)
-	defer stop()
+	proxyAddr := startProxy(t, true)
 
 	resp, _ := dialThroughProxy(t, proxyAddr, backend.URL, "")
 	if resp.StatusCode != 407 {
@@ -219,8 +204,7 @@ func TestProxyAuthSuccess(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, true)
-	defer stop()
+	proxyAddr := startProxy(t, true)
 
 	encoded := "dGVzdHVzZXI6dGVzdHBhc3M="
 	resp, body := dialThroughProxy(t, proxyAddr, backend.URL, encoded)
@@ -238,8 +222,7 @@ func TestProxyAuthWrong(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, true)
-	defer stop()
+	proxyAddr := startProxy(t, true)
 
 	encoded := "d3Jvbmc6d3Jvbmc="
 	resp, _ := dialThroughProxy(t, proxyAddr, backend.URL, encoded)
@@ -256,8 +239,7 @@ func TestProxyStripsAuthHeader(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, true)
-	defer stop()
+	proxyAddr := startProxy(t, true)
 
 	encoded := "dGVzdHVzZXI6dGVzdHBhc3M="
 	dialThroughProxy(t, proxyAddr, backend.URL, encoded)
@@ -278,8 +260,7 @@ func TestProxyAddsViaHeader(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxyAddr, stop := startProxy(t, false)
-	defer stop()
+	proxyAddr := startProxy(t, false)
 
 	dialThroughProxy(t, proxyAddr, backend.URL, "")
 
@@ -289,8 +270,7 @@ func TestProxyAddsViaHeader(t *testing.T) {
 }
 
 func TestProxyBadGateway(t *testing.T) {
-	proxyAddr, stop := startProxy(t, false)
-	defer stop()
+	proxyAddr := startProxy(t, false)
 
 	resp, _ := dialThroughProxy(t, proxyAddr, "http://192.0.2.1:80/get", "")
 	if resp.StatusCode != 502 {
@@ -320,7 +300,7 @@ func TestTransportDataNoLeak(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- tunnel.TransportData(&connA, &connB)
+		done <- tunnel.TransportData(connA, connB)
 	}()
 
 	go func() {

@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"crypto/subtle"
 	"encoding/base64"
 	"gocks/internal/config"
@@ -11,53 +10,30 @@ import (
 	"strings"
 )
 
-func parseHeaders(data []byte) map[string]string {
-	headers := make(map[string]string)
-	lines := bytes.Split(data, config.CRLF)
-	for _, line := range lines {
-		parts := strings.SplitN(string(line), ": ", 2)
-		if len(parts) == 2 && parts[0] == constant.BasicAuthHeader {
-			headers[constant.BasicAuthHeader] = parts[1]
-			break
-		}
-	}
-	return headers
+func checkProxyAuthorizationFromHeader(auth *config.Auth, header http.Header) bool {
+	return checkAuthHeader(auth, header.Get(constant.BasicAuthHeader))
 }
 
-func checkProxyAuthorization(headers map[string]string) bool {
-	authHeader, exists := headers[constant.BasicAuthHeader]
-	if !exists {
-		return false
-	}
-	return checkAuthHeader(authHeader)
-}
-
-func checkProxyAuthorizationFromHeader(header http.Header) bool {
-	return checkAuthHeader(header.Get(constant.BasicAuthHeader))
-}
-
-func checkAuthHeader(authHeader string) bool {
-	if !strings.HasPrefix(authHeader, constant.BasicAuthPrefix) {
+// checkAuthHeader verifies one Proxy-Authorization header value against auth.
+// Both fields are compared in constant time so the response cannot be used as
+// a timing oracle.
+func checkAuthHeader(auth *config.Auth, authHeader string) bool {
+	if auth == nil || !strings.HasPrefix(authHeader, constant.BasicAuthPrefix) {
 		return false
 	}
 
-	encoded := strings.TrimPrefix(authHeader, constant.BasicAuthPrefix)
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, constant.BasicAuthPrefix))
 	if err != nil {
 		log.Println("failed to decode Proxy-Authorization header:", err)
 		return false
 	}
 
-	authParts := strings.SplitN(string(decoded), ":", 2)
-	if len(authParts) != 2 {
+	username, password, ok := strings.Cut(string(decoded), ":")
+	if !ok {
 		return false
 	}
 
-	username, password := authParts[0], authParts[1]
-	expectedUser := config.ProxyConfig.Username
-	expectedPass := config.ProxyConfig.Password
-
-	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(expectedUser)) == 1
-	passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(expectedPass)) == 1
+	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(auth.Username)) == 1
+	passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(auth.Password)) == 1
 	return userMatch && passMatch
 }

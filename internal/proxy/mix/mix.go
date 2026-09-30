@@ -4,9 +4,10 @@ import (
 	"context"
 	"gocks/internal/config"
 	"gocks/internal/constant"
-	"gocks/internal/netutil"
+	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/proxy/http"
 	"gocks/internal/proxy/socks5"
+	"gocks/internal/server"
 	"log"
 	"net"
 	"time"
@@ -14,55 +15,35 @@ import (
 
 // Run serves the HTTP+SOCKS5 mixed proxy until ctx is cancelled.
 func Run(ctx context.Context) error {
-	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
-	if err != nil {
-		return err
-	}
-	defer listen.Close()
-
-	go func() {
-		<-ctx.Done()
-		listen.Close()
-	}()
-
-	log.Println("MIX proxy listening", config.ProxyConfig.BindAddr)
-
-	for {
-		conn, err := listen.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Println("Error accepting connection:", err)
-			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
-				return nil
-			}
-			continue
-		}
-		go chooseProxy(&conn)
-	}
+	return server.Serve(ctx, "MIX proxy", config.ProxyConfig.BindAddr, chooseProxy)
 }
 
-func chooseProxy(conn *net.Conn) {
+// chooseProxy peeks at the first byte to tell the two protocols apart: a SOCKS5
+// client always opens with its version byte, anything else is treated as HTTP.
+// The pre-read bytes are handed to the chosen handler so its parser sees the
+// complete opening message.
+func chooseProxy(conn net.Conn) {
 	buff := make([]byte, constant.DefaultReadBytes)
-	if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		log.Printf("set read deadline error: %v", err)
+		conn.Close()
 		return
 	}
-	n, err := (*conn).Read(buff)
+	n, err := conn.Read(buff)
 	if err != nil || n < 1 {
 		log.Printf("Error reading from connection: %v", err)
+		conn.Close()
 		return
 	}
-	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		log.Printf("reset read deadline error: %v", err)
+		conn.Close()
 		return
 	}
 
-	switch buff[0] {
-	case 0x05:
-		go socks5.HandleSocks5Connection(conn, buff[:n])
-	default:
-		go http.HandleHTTPConnection(conn, buff[:n])
+	if buff[0] == socks5proto.Version {
+		socks5.HandleSocks5Connection(conn, buff[:n])
+		return
 	}
+	http.HandleHTTPConnection(conn, buff[:n])
 }

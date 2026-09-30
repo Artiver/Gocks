@@ -3,24 +3,15 @@ package tunnel
 import (
 	"context"
 	"errors"
-	"fmt"
 	"gocks/internal/constant"
 	"io"
 	"net"
-	"strings"
 	"time"
 )
 
 // ErrNotSupported is returned by CloseWrite/CloseRead when the underlying
 // connection does not support half-closing.
 var ErrNotSupported = errors.New("tunnel: half-close not supported")
-
-func FormatAddress(ip string, port uint16) string {
-	if strings.Contains(ip, ":") {
-		return fmt.Sprintf("[%s]:%d", ip, port)
-	}
-	return fmt.Sprintf("%s:%d", ip, port)
-}
 
 // TransportStats reports the bytes copied in each direction.
 type TransportStats struct {
@@ -30,19 +21,13 @@ type TransportStats struct {
 
 // TransportData proxies data bidirectionally between source and target until
 // both directions have finished.
-func TransportData(source, target *net.Conn) error {
+func TransportData(source, target net.Conn) error {
 	_, err := TransportDataStats(source, target)
 	return err
 }
 
-// TransportDataContext proxies data bidirectionally between source and target.
-func TransportDataContext(ctx context.Context, source, target *net.Conn) error {
-	_, err := TransportDataContextStats(ctx, source, target)
-	return err
-}
-
 // TransportDataStats is TransportData that also reports byte counts.
-func TransportDataStats(source, target *net.Conn) (TransportStats, error) {
+func TransportDataStats(source, target net.Conn) (TransportStats, error) {
 	return TransportDataContextStats(context.Background(), source, target)
 }
 
@@ -51,7 +36,7 @@ func TransportDataStats(source, target *net.Conn) (TransportStats, error) {
 // when it ends, so the peer sees an EOF instead of a stalled connection. When
 // a connection cannot be half-closed it is closed outright, which also
 // unblocks the other direction. Cancelling ctx force-closes both connections.
-func TransportDataContextStats(ctx context.Context, source, target *net.Conn) (TransportStats, error) {
+func TransportDataContextStats(ctx context.Context, source, target net.Conn) (TransportStats, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -62,11 +47,11 @@ func TransportDataContextStats(ctx context.Context, source, target *net.Conn) (T
 	}
 	errCh := make(chan result, 2)
 	go func() {
-		n, err := copyHalf(ctx, *target, *source)
+		n, err := copyHalf(ctx, target, source)
 		errCh <- result{0, n, err}
 	}()
 	go func() {
-		n, err := copyHalf(ctx, *source, *target)
+		n, err := copyHalf(ctx, source, target)
 		errCh <- result{1, n, err}
 	}()
 
@@ -177,10 +162,10 @@ func closeRead(c net.Conn) {
 	}
 }
 
-func forceClose(conns ...*net.Conn) {
+func forceClose(conns ...net.Conn) {
 	for _, c := range conns {
-		if c != nil && *c != nil {
-			_ = (*c).Close()
+		if c != nil {
+			_ = c.Close()
 		}
 	}
 }

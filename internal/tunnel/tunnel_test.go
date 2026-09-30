@@ -49,7 +49,7 @@ func TestTransportDataHalfClose(t *testing.T) {
 	defer b2.Close()
 
 	done := make(chan error, 1)
-	go func() { done <- TransportData(&a2, &b1) }()
+	go func() { done <- TransportData(a2, b1) }()
 
 	// a -> b
 	if _, err := a1.Write([]byte("hello")); err != nil {
@@ -100,7 +100,7 @@ func TestTransportDataFullCloseFallback(t *testing.T) {
 	c, d := net.Pipe()
 
 	done := make(chan error, 1)
-	go func() { done <- TransportData(&a, &c) }()
+	go func() { done <- TransportData(a, c) }()
 
 	if _, err := b.Write([]byte("x")); err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestTransportDataStats(t *testing.T) {
 
 	statsCh := make(chan TransportStats, 1)
 	go func() {
-		stats, _ := TransportDataStats(&a, &c)
+		stats, _ := TransportDataStats(a, c)
 		statsCh <- stats
 	}()
 
@@ -178,7 +178,7 @@ func TestTransportDataContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- TransportDataContext(ctx, &a, &c) }()
+	go func() { _, err := TransportDataContextStats(ctx, a, c); done <- err }()
 
 	cancel()
 

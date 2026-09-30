@@ -8,126 +8,40 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	socks5proto "gocks/internal/protocol/socks5"
+	"gocks/internal/testsupport"
 	"gocks/internal/tunnel"
 )
 
-// targetLog records the CONNECT targets a relay double was asked to reach, in
-// order, so a test can prove which hops were traversed.
-type targetLog struct {
-	mu      sync.Mutex
-	targets []string
-}
-
-func (l *targetLog) add(target string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.targets = append(l.targets, target)
-}
-
-func (l *targetLog) snapshot() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]string(nil), l.targets...)
-}
-
-// startSocks5Relay runs a SOCKS5 server that really connects to the requested
-// target, so it can act as any hop of a chain.
-func startSocks5Relay(t *testing.T, cred *socks5proto.Credential) (string, *targetLog) {
+// startSocks5Relay runs a SOCKS5 upstream that really connects to the requested
+// target, so it can act as any hop of a chain. It records the targets it was
+// asked for.
+func startSocks5Relay(t *testing.T, cred *socks5proto.Credential) (string, *testsupport.TargetLog) {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	log := &targetLog{}
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go serveSocks5Relay(c, cred, log)
-		}
-	}()
-
-	return ln.Addr().String(), log
-}
-
-func serveSocks5Relay(c net.Conn, cred *socks5proto.Credential, log *targetLog) {
-	defer c.Close()
-
-	selector := socks5proto.NewServerSelector()
-	if cred != nil {
-		selector = socks5proto.NewServerSelector(*cred)
-	}
-	if _, err := socks5proto.ServerHandshake(c, selector); err != nil {
-		return
-	}
-
-	req, err := socks5proto.ReadRequest(c)
-	if err != nil {
-		return
-	}
-	if req.Cmd != socks5proto.CmdConnect || req.Addr == nil {
-		socks5proto.NewReply(socks5proto.RepCmdUnsupported, nil).Write(c)
-		return
-	}
-
-	target := req.Addr.String()
-	log.add(target)
-
-	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
-	if err != nil {
-		socks5proto.NewReply(socks5proto.RepHostUnreachable, nil).Write(c)
-		return
-	}
-	defer upstream.Close()
-
-	reply := socks5proto.NewReply(socks5proto.RepSucceeded, nil)
-	if bound, err := socks5proto.NewAddr(upstream.LocalAddr().String()); err == nil {
-		reply.Addr = bound
-	}
-	if err := reply.Write(c); err != nil {
-		return
-	}
-	relay(c, c, upstream)
+	log := &testsupport.TargetLog{}
+	addr := testsupport.Socks5Upstream(t, testsupport.Socks5Options{Cred: cred, Log: log})
+	return addr, log
 }
 
 // startHTTPRelay runs an HTTP CONNECT proxy that really connects to the
 // requested target, so it can act as any hop of a chain.
-func startHTTPRelay(t *testing.T, username, password string) (string, *targetLog) {
+func startHTTPRelay(t *testing.T, username, password string) (string, *testsupport.TargetLog) {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	log := &targetLog{}
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go serveHTTPRelay(c, username, password, log)
-		}
-	}()
-
-	return ln.Addr().String(), log
+	log := &testsupport.TargetLog{}
+	addr := testsupport.TCPServer(t, func(c net.Conn) {
+		serveHTTPRelay(c, username, password, log)
+	})
+	return addr, log
 }
 
-func serveHTTPRelay(c net.Conn, username, password string, log *targetLog) {
+func serveHTTPRelay(c net.Conn, username, password string, log *testsupport.TargetLog) {
 	defer c.Close()
 
 	br := bufio.NewReader(c)
@@ -149,7 +63,7 @@ func serveHTTPRelay(c net.Conn, username, password string, log *targetLog) {
 	}
 
 	target := req.Host
-	log.add(target)
+	log.Add(target)
 
 	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {
@@ -204,69 +118,14 @@ func httpHop(t *testing.T, bindAddr, username, password string) config.Url {
 	return hop
 }
 
-// closedAddr returns a loopback address that nothing is listening on.
-func closedAddr(t *testing.T) string {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-	return addr
-}
-
-// startSilentListener accepts connections, reads a byte and closes, so a
-// handshake against it fails while the TCP connect itself succeeds.
-func startSilentListener(t *testing.T) string {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 2)
-				c.Read(buf)
-			}(c)
-		}
-	}()
-
-	return ln.Addr().String()
-}
-
-func assertTargets(t *testing.T, log *targetLog, want ...string) {
-	t.Helper()
-
-	got := log.snapshot()
-	if len(got) != len(want) {
-		t.Fatalf("relay targets=%v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("relay target[%d]=%q want %q", i, got[i], want[i])
-		}
-	}
-}
-
 func TestDialThroughChainEmptyChain(t *testing.T) {
-	if _, err := DialThroughChain(nil, startTCPEcho(t)); err == nil {
+	if _, err := DialThroughChain(nil, testsupport.TCPEcho(t)); err == nil {
 		t.Fatal("expected an empty chain to be rejected")
 	}
 }
 
 func TestDialThroughChainTwoSocks5Hops(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	hop2, hop2Log := startSocks5Relay(t, nil)
 	hop1, hop1Log := startSocks5Relay(t, nil)
 
@@ -279,15 +138,15 @@ func TestDialThroughChainTwoSocks5Hops(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "two-hops")
+	testsupport.AssertEcho(t, conn, "two-hops")
 
 	// The first hop reaches the second, and only the second sees the target.
-	assertTargets(t, hop1Log, hop2)
-	assertTargets(t, hop2Log, target)
+	hop1Log.Assert(t, hop2)
+	hop2Log.Assert(t, target)
 }
 
 func TestDialThroughChainThreeHops(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	hop3, hop3Log := startSocks5Relay(t, nil)
 	hop2, hop2Log := startSocks5Relay(t, nil)
 	hop1, hop1Log := startSocks5Relay(t, nil)
@@ -302,15 +161,15 @@ func TestDialThroughChainThreeHops(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "three-hops")
+	testsupport.AssertEcho(t, conn, "three-hops")
 
-	assertTargets(t, hop1Log, hop2)
-	assertTargets(t, hop2Log, hop3)
-	assertTargets(t, hop3Log, target)
+	hop1Log.Assert(t, hop2)
+	hop2Log.Assert(t, hop3)
+	hop3Log.Assert(t, target)
 }
 
 func TestDialThroughChainSocks5ThenHTTP(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	proxy2, proxy2Log := startHTTPRelay(t, "", "")
 	proxy1, proxy1Log := startSocks5Relay(t, nil)
 
@@ -323,14 +182,14 @@ func TestDialThroughChainSocks5ThenHTTP(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "socks5-then-http")
+	testsupport.AssertEcho(t, conn, "socks5-then-http")
 
-	assertTargets(t, proxy1Log, proxy2)
-	assertTargets(t, proxy2Log, target)
+	proxy1Log.Assert(t, proxy2)
+	proxy2Log.Assert(t, target)
 }
 
 func TestDialThroughChainHTTPThenSocks5(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	proxy2, proxy2Log := startSocks5Relay(t, nil)
 	proxy1, proxy1Log := startHTTPRelay(t, "", "")
 
@@ -343,14 +202,14 @@ func TestDialThroughChainHTTPThenSocks5(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "http-then-socks5")
+	testsupport.AssertEcho(t, conn, "http-then-socks5")
 
-	assertTargets(t, proxy1Log, proxy2)
-	assertTargets(t, proxy2Log, target)
+	proxy1Log.Assert(t, proxy2)
+	proxy2Log.Assert(t, target)
 }
 
 func TestDialThroughChainSingleHTTPHop(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	proxy, proxyLog := startHTTPRelay(t, "", "")
 
 	conn, err := DialThroughChain([]config.Url{httpHop(t, proxy, "", "")}, target)
@@ -359,12 +218,12 @@ func TestDialThroughChainSingleHTTPHop(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "single-http-hop")
-	assertTargets(t, proxyLog, target)
+	testsupport.AssertEcho(t, conn, "single-http-hop")
+	proxyLog.Assert(t, target)
 }
 
 func TestDialThroughChainSingleHTTPHopAuth(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	proxy, proxyLog := startHTTPRelay(t, "user", "pass")
 
 	conn, err := DialThroughChain([]config.Url{httpHop(t, proxy, "user", "pass")}, target)
@@ -373,12 +232,12 @@ func TestDialThroughChainSingleHTTPHopAuth(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "http-auth")
-	assertTargets(t, proxyLog, target)
+	testsupport.AssertEcho(t, conn, "http-auth")
+	proxyLog.Assert(t, target)
 }
 
 func TestDialThroughChainHTTPHopAuthFailure(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	proxy, proxyLog := startHTTPRelay(t, "user", "pass")
 
 	_, err := DialThroughChain([]config.Url{httpHop(t, proxy, "user", "wrong")}, target)
@@ -388,13 +247,13 @@ func TestDialThroughChainHTTPHopAuthFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "hop[0]") {
 		t.Fatalf("error should name the failing hop, got: %v", err)
 	}
-	assertTargets(t, proxyLog)
+	proxyLog.Assert(t)
 }
 
 // TestDialThroughChainPerHopCredentials proves every hop uses its own
 // credentials: the first hop accepts, the second rejects the first hop's pair.
 func TestDialThroughChainPerHopCredentials(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	hop2, hop2Log := startSocks5Relay(t, &socks5proto.Credential{Username: "user2", Password: "pass2"})
 	hop1, hop1Log := startSocks5Relay(t, &socks5proto.Credential{Username: "user1", Password: "pass1"})
 
@@ -409,8 +268,8 @@ func TestDialThroughChainPerHopCredentials(t *testing.T) {
 		t.Fatalf("error should name the failing hop, got: %v", err)
 	}
 	// The first hop accepted our credentials and was asked to reach the second.
-	assertTargets(t, hop1Log, hop2)
-	assertTargets(t, hop2Log)
+	hop1Log.Assert(t, hop2)
+	hop2Log.Assert(t)
 
 	// With each hop's own credentials the same chain works.
 	conn, err := DialThroughChain([]config.Url{
@@ -422,17 +281,17 @@ func TestDialThroughChainPerHopCredentials(t *testing.T) {
 	}
 	defer conn.Close()
 
-	assertEcho(t, conn, "per-hop-credentials")
-	assertTargets(t, hop2Log, target)
+	testsupport.AssertEcho(t, conn, "per-hop-credentials")
+	hop2Log.Assert(t, target)
 }
 
 // TestDialThroughChainUnreachableNextHop covers the case where an intermediate
 // hop cannot reach the following one: the report comes from the hop that was
 // being talked to, so the error names that hop.
 func TestDialThroughChainUnreachableNextHop(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	hop1, hop1Log := startSocks5Relay(t, nil)
-	unreachable := closedAddr(t)
+	unreachable := testsupport.ClosedAddr(t)
 
 	_, err := DialThroughChain([]config.Url{
 		socks5Hop(t, hop1, "", ""),
@@ -445,14 +304,14 @@ func TestDialThroughChainUnreachableNextHop(t *testing.T) {
 		t.Fatalf("error should name the hop that reported it, got: %v", err)
 	}
 	// The first hop accepted our credentials and was asked to reach the second.
-	assertTargets(t, hop1Log, unreachable)
+	hop1Log.Assert(t, unreachable)
 }
 
 // TestDialThroughChainReportsFailingHop covers a failure inside a deeper hop's
 // own handshake, which must be attributed to that hop.
 func TestDialThroughChainReportsFailingHop(t *testing.T) {
-	target := startTCPEcho(t)
-	hop2 := startSilentListener(t)
+	target := testsupport.TCPEcho(t)
+	hop2 := testsupport.SilentListener(t)
 	hop1, hop1Log := startSocks5Relay(t, nil)
 
 	_, err := DialThroughChain([]config.Url{
@@ -465,11 +324,11 @@ func TestDialThroughChainReportsFailingHop(t *testing.T) {
 	if !strings.Contains(err.Error(), "hop[1]") || !strings.Contains(err.Error(), hop2) {
 		t.Fatalf("error should name the failing hop and address, got: %v", err)
 	}
-	assertTargets(t, hop1Log, hop2)
+	hop1Log.Assert(t, hop2)
 }
 
 func TestDialThroughChainRejectsUnknownScheme(t *testing.T) {
-	target := startTCPEcho(t)
+	target := testsupport.TCPEcho(t)
 	_, err := DialThroughChain([]config.Url{{Scheme: "ftp", BindAddr: "127.0.0.1:1"}}, target)
 	if err == nil {
 		t.Fatal("expected an unsupported scheme to be rejected")

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"gocks/internal/config"
 	"gocks/internal/constant"
-	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
+	"gocks/internal/server"
 	"gocks/internal/tunnel"
 	"log"
 	"net"
@@ -16,64 +16,40 @@ import (
 
 // Run serves SOCKS5 until ctx is cancelled.
 func Run(ctx context.Context) error {
-	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
-	if err != nil {
-		return err
-	}
-	defer listen.Close()
-
-	go func() {
-		<-ctx.Done()
-		listen.Close()
-	}()
-
-	log.Println("SOCKS5 proxy listening", config.ProxyConfig.BindAddr)
-
-	for {
-		conn, err := listen.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Println("Error accepting connection:", err)
-			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
-				return nil
-			}
-			continue
-		}
-		go HandleSocks5Connection(&conn, nil)
-	}
+	return server.Serve(ctx, "SOCKS5 proxy", config.ProxyConfig.BindAddr, func(conn net.Conn) {
+		HandleSocks5Connection(conn, nil)
+	})
 }
 
-func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
+// HandleSocks5Connection serves one client. firstBuff carries the bytes the
+// mixed-mode dispatcher pre-read to tell HTTP and SOCKS5 apart; they are
+// replayed so the handshake sees the complete client greeting.
+func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
 		}
 	}()
 
-	var c net.Conn = *conn
 	if len(firstBuff) > 0 {
-		// Replay the bytes pre-read by the mixed-mode dispatcher so the
-		// handshake sees the complete client greeting.
-		c = tunnel.NewPrefixConn(firstBuff, *conn)
+		conn = tunnel.NewPrefixConn(firstBuff, conn)
 	}
 	defer func() {
-		if err := c.Close(); err != nil {
+		if err := conn.Close(); err != nil {
 			log.Println("connection close error", err)
 		}
 	}()
 
-	clientID, err := socks5Handshake(c)
+	clientID, err := socks5Handshake(conn)
 	if err != nil {
 		log.Println("Handshake error:", err)
 		return
 	}
 	if clientID != "" {
-		log.Printf("[SOCKS5] client %q from %s", clientID, c.RemoteAddr())
+		log.Printf("[SOCKS5] client %q from %s", clientID, conn.RemoteAddr())
 	}
 
-	if err := socks5HandleRequest(&c); err != nil {
+	if err := socks5HandleRequest(conn); err != nil {
 		log.Println("Request handling error:", err)
 	}
 }
@@ -88,34 +64,35 @@ func socks5Handshake(conn net.Conn) (string, error) {
 // newSelector builds the authentication selector from the proxy configuration.
 // Authentication is mandatory when credentials were configured via -L.
 func newSelector() socks5proto.Selector {
-	if !config.ProxyConfig.AuthEnabled {
+	auth := config.ProxyConfig.Auth
+	if auth == nil {
 		return socks5proto.NewServerSelector()
 	}
 	return socks5proto.NewServerSelector(socks5proto.Credential{
-		Username: config.ProxyConfig.Username,
-		Password: config.ProxyConfig.Password,
+		Username: auth.Username,
+		Password: auth.Password,
 	})
 }
 
-func socks5HandleRequest(conn *net.Conn) error {
-	if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
+func socks5HandleRequest(conn net.Conn) error {
+	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}
 
 	// ReadRequest frames the request exactly, so any payload the client sent
 	// right after it stays in the socket and is forwarded by the command
 	// handler instead of being discarded.
-	req, err := socks5proto.ReadRequest(*conn)
+	req, err := socks5proto.ReadRequest(conn)
 	if err != nil {
 		if errors.Is(err, socks5proto.ErrBadAddrType) {
-			if werr := writeReply(conn, socks5proto.RepAddrUnsupported); werr != nil {
+			if werr := writeReply(conn, socks5proto.RepAddrUnsupported, nil); werr != nil {
 				log.Println("write reply error:", werr)
 			}
 		}
 		return err
 	}
 
-	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		return err
 	}
 
@@ -127,26 +104,27 @@ func socks5HandleRequest(conn *net.Conn) error {
 	case socks5proto.CmdUDP:
 		return handleUDPAssociate(conn)
 	default:
-		if werr := writeReply(conn, socks5proto.RepCmdUnsupported); werr != nil {
+		if werr := writeReply(conn, socks5proto.RepCmdUnsupported, nil); werr != nil {
 			log.Println("write reply error:", werr)
 		}
 		return fmt.Errorf("unsupported command %d", req.Cmd)
 	}
 }
 
-// writeReply sends a reply carrying no bound address.
-func writeReply(conn *net.Conn, rep byte) error {
-	return socks5proto.NewReply(rep, nil).Write(*conn)
+// writeReply sends one reply. A nil addr is encoded as 0.0.0.0:0, which is what
+// RFC 1928 §6 allows when no bound address is meaningful.
+func writeReply(conn net.Conn, rep byte, addr *socks5proto.Addr) error {
+	return socks5proto.NewReply(rep, addr).Write(conn)
 }
 
-// writeBndReply sends a reply carrying the given bound address, falling back
-// to no address (0.0.0.0:0) when it cannot be represented.
-func writeBndReply(conn *net.Conn, rep byte, bnd net.Addr) error {
-	reply := socks5proto.NewReply(rep, nil)
+// writeBndReply sends a reply carrying the given bound address, falling back to
+// no address (0.0.0.0:0) when it cannot be represented.
+func writeBndReply(conn net.Conn, rep byte, bnd net.Addr) error {
+	var addr *socks5proto.Addr
 	if bnd != nil {
-		if addr, err := socks5proto.NewAddr(bnd.String()); err == nil {
-			reply.Addr = addr
+		if parsed, err := socks5proto.NewAddr(bnd.String()); err == nil {
+			addr = parsed
 		}
 	}
-	return reply.Write(*conn)
+	return writeReply(conn, rep, addr)
 }

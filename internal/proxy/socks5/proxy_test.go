@@ -13,13 +13,16 @@ import (
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	socks5proto "gocks/internal/protocol/socks5"
+	"gocks/internal/testsupport"
 	"gocks/internal/tunnel"
 )
 
 func setAuth(username, password string, enabled bool) {
-	config.ProxyConfig.Username = username
-	config.ProxyConfig.Password = password
-	config.ProxyConfig.AuthEnabled = enabled
+	if !enabled {
+		config.ProxyConfig.Auth = nil
+		return
+	}
+	config.ProxyConfig.Auth = &config.Auth{Username: username, Password: password}
 }
 
 // runHandshake exercises socks5Handshake on one end of a net.Pipe while the
@@ -75,53 +78,13 @@ func writeUserPass(t *testing.T, c net.Conn, username, password string) {
 	}
 }
 
-// startEcho starts a TCP echo server on loopback and returns its address.
-func startEcho(t *testing.T) string {
-	t.Helper()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				io.Copy(c, c)
-			}(c)
-		}
-	}()
-
-	return ln.Addr().String()
-}
-
 // startSocks5Proxy serves SOCKS5 on loopback and returns its address.
 func startSocks5Proxy(t *testing.T) string {
 	t.Helper()
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go HandleSocks5Connection(&c, nil)
-		}
-	}()
-
-	return ln.Addr().String()
+	return testsupport.TCPServer(t, func(c net.Conn) {
+		HandleSocks5Connection(c, nil)
+	})
 }
 
 // dialSocks5Connect performs a no-auth handshake and a CONNECT to target,
@@ -291,7 +254,7 @@ func TestSocks5ConnectEndToEnd(t *testing.T) {
 	setAuth("", "", false)
 	config.ForwardChain = nil
 
-	echoAddr := startEcho(t)
+	echoAddr := testsupport.TCPEcho(t)
 	proxyAddr := startSocks5Proxy(t)
 
 	conn, _ := dialSocks5Connect(t, proxyAddr, echoAddr)
@@ -315,7 +278,7 @@ func TestSocks5ConnectPipelinedPayload(t *testing.T) {
 	setAuth("", "", false)
 	config.ForwardChain = nil
 
-	echoAddr := startEcho(t)
+	echoAddr := testsupport.TCPEcho(t)
 	proxyAddr := startSocks5Proxy(t)
 
 	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
@@ -368,7 +331,7 @@ func TestSocks5ConnectDomain(t *testing.T) {
 	setAuth("", "", false)
 	config.ForwardChain = nil
 
-	echoAddr := startEcho(t)
+	echoAddr := testsupport.TCPEcho(t)
 	proxyAddr := startSocks5Proxy(t)
 
 	_, port, err := net.SplitHostPort(echoAddr)
@@ -408,7 +371,7 @@ func TestRequestUnsupportedCommand(t *testing.T) {
 		}
 	}()
 
-	_ = socks5HandleRequest(&server)
+	_ = socks5HandleRequest(server)
 
 	select {
 	case rep := <-repCh:
@@ -437,7 +400,7 @@ func TestRequestUnsupportedAddrType(t *testing.T) {
 		}
 	}()
 
-	_ = socks5HandleRequest(&server)
+	_ = socks5HandleRequest(server)
 
 	select {
 	case rep := <-repCh:
@@ -453,7 +416,7 @@ func TestConnectBndAddress(t *testing.T) {
 	setAuth("", "", false)
 	config.ForwardChain = nil
 
-	echoAddr := startEcho(t)
+	echoAddr := testsupport.TCPEcho(t)
 	proxyAddr := startSocks5Proxy(t)
 
 	_, reply := dialSocks5Connect(t, proxyAddr, echoAddr)
@@ -624,7 +587,7 @@ func TestBindAbortOnControlClose(t *testing.T) {
 
 	addr := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "127.0.0.1", Port: 0}
 	done := make(chan error, 1)
-	go func() { done <- handleBind(&server, addr) }()
+	go func() { done <- handleBind(server, addr) }()
 
 	reply, err := socks5proto.ReadReply(client)
 	if err != nil {
@@ -834,7 +797,7 @@ func TestUDPAssociateTerminatesOnTCPClose(t *testing.T) {
 	defer server.Close()
 
 	done := make(chan error, 1)
-	go func() { done <- handleUDPAssociate(&server) }()
+	go func() { done <- handleUDPAssociate(server) }()
 
 	reply, err := socks5proto.ReadReply(client)
 	if err != nil {
