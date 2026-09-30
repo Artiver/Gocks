@@ -8,25 +8,32 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 
 - TCP端口转发
 - UDP端口转发
-- HTTP代理（Basic认证）
-- Socks5代理（用户密码认证）
-- 混合代理
-- 上游HTTP/Socks5代理
+- HTTP代理（Basic认证，支持 Keep-Alive 连接复用）
+- Socks5代理
+  - CONNECT / BIND / UDP ASSOCIATE
+  - 用户密码认证（RFC1929，常量时间比较）
+  - 按 RFC1928 进行方法协商与错误码返回
+- 混合代理（同一端口同时接受 HTTP 与 Socks5）
+- 上游 HTTP/Socks5 代理，UDP 关联亦可经上游转发
+- 空闲超时、半关闭透传，SIGINT/SIGTERM 优雅退出
 
 # 目录
 
 ```plaintext
 Gocks/
-├── cmd/gocks/main.go              # CLI 入口
+├── cmd/gocks/main.go              # CLI 入口（SIGINT/SIGTERM 优雅退出）
 ├── internal/
-│   ├── constant/                  # 协议常量（protocol.go, socks5.go）
+│   ├── constant/                  # 协议/超时常量（protocol.go）
 │   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
-│   ├── tunnel/                    # 数据透传核心（tunnel.go, conn.go）
-│   ├── dialer/                    # 统一拨号入口（dialer.go）
+│   ├── protocol/socks5/           # SOCKS5 编解码与服务端握手
+│   │                              #   codec/method/auth/addr/request/reply/udp/server
+│   ├── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）
+│   ├── netutil/                   # 网络小工具（可取消的 Sleep）
+│   ├── dialer/                    # 统一拨号入口（TCP/UDP 上游）
 │   ├── forward/                   # 上游代理拨号（http.go, socks5.go）
 │   ├── proxy/                     # 代理协议
 │   │   ├── http/                  #   HTTP 代理
-│   │   ├── socks5/                #   Socks5 代理
+│   │   ├── socks5/                #   SOCKS5 代理（CONNECT/BIND/UDP）
 │   │   └── mix/                   #   混合代理
 │   └── transport/                 # 端口转发
 │       ├── tcp/
