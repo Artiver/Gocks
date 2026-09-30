@@ -645,6 +645,216 @@ func TestBindAbortOnControlClose(t *testing.T) {
 	}
 }
 
+// startUDPEcho starts a UDP echo server bound to host and returns its address.
+func startUDPEcho(t *testing.T, host string) *net.UDPAddr {
+	t.Helper()
+
+	laddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		t.Skipf("cannot listen on %s: %v", host, err)
+	}
+	t.Cleanup(func() { pc.Close() })
+
+	go func() {
+		buf := make([]byte, udpBufferSize)
+		for {
+			n, addr, err := pc.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if _, err := pc.WriteToUDP(buf[:n], addr); err != nil {
+				return
+			}
+		}
+	}()
+
+	return pc.LocalAddr().(*net.UDPAddr)
+}
+
+// udpAssociate performs a no-auth handshake and a UDP ASSOCIATE request,
+// returning the control connection and the advertised relay address.
+func udpAssociate(t *testing.T, proxyAddr string) (net.Conn, *socks5proto.Addr) {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	reqAddr := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "0.0.0.0", Port: 0}
+	var reqBuf bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdUDP, reqAddr).Write(&reqBuf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(reqBuf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("udp associate reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("udp associate rep=%d", reply.Rep)
+	}
+	if reply.Addr == nil || reply.Addr.Port == 0 {
+		t.Fatal("udp associate missing relay address")
+	}
+	return conn, reply.Addr
+}
+
+func udpRoundTrip(t *testing.T, client *net.UDPConn, relay *socks5proto.Addr, target *socks5proto.Addr, payload []byte) *socks5proto.UDPDatagram {
+	t.Helper()
+
+	wire, err := socks5proto.NewUDPDatagram(socks5proto.NewUDPHeader(0, 0, target), payload).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayAddr := &net.UDPAddr{IP: net.ParseIP(relay.Host), Port: int(relay.Port)}
+	if _, err := client.WriteToUDP(wire, relayAddr); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, udpBufferSize)
+	n, _, err := client.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("read relayed datagram: %v", err)
+	}
+	var got socks5proto.UDPDatagram
+	if err := got.Unmarshal(buf[:n]); err != nil {
+		t.Fatalf("unmarshal relayed datagram: %v", err)
+	}
+	return &got
+}
+
+func TestUDPAssociateRoundTrip(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echo := startUDPEcho(t, "127.0.0.1")
+	proxyAddr := startSocks5Proxy(t)
+
+	_, relay := udpAssociate(t, proxyAddr)
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+
+	target := &socks5proto.Addr{Host: echo.IP.String(), Port: uint16(echo.Port)}
+	payload := []byte("udp-hello")
+	got := udpRoundTrip(t, client, relay, target, payload)
+
+	if !bytes.Equal(got.Data, payload) {
+		t.Fatalf("payload=%q want %q", got.Data, payload)
+	}
+	if got.Header.Frag != 0 {
+		t.Fatalf("unexpected frag=%d", got.Header.Frag)
+	}
+	if got.Header.Addr.Host != echo.IP.String() || got.Header.Addr.Port != uint16(echo.Port) {
+		t.Fatalf("reply addr=%s want %s", got.Header.Addr, echo)
+	}
+}
+
+func TestUDPAssociateDomain(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echo := startUDPEcho(t, "localhost")
+	proxyAddr := startSocks5Proxy(t)
+
+	_, relay := udpAssociate(t, proxyAddr)
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+
+	target := &socks5proto.Addr{Type: socks5proto.AddrDomain, Host: "localhost", Port: uint16(echo.Port)}
+	payload := []byte("udp-domain")
+	got := udpRoundTrip(t, client, relay, target, payload)
+
+	if !bytes.Equal(got.Data, payload) {
+		t.Fatalf("payload=%q want %q", got.Data, payload)
+	}
+}
+
+func TestUDPAssociateFragDropped(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echo := startUDPEcho(t, "127.0.0.1")
+	proxyAddr := startSocks5Proxy(t)
+
+	_, relay := udpAssociate(t, proxyAddr)
+
+	client, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	target := &socks5proto.Addr{Host: echo.IP.String(), Port: uint16(echo.Port)}
+	wire, err := socks5proto.NewUDPDatagram(socks5proto.NewUDPHeader(0, 1, target), []byte("fragmented")).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayAddr := &net.UDPAddr{IP: net.ParseIP(relay.Host), Port: int(relay.Port)}
+	if _, err := client.WriteToUDP(wire, relayAddr); err != nil {
+		t.Fatal(err)
+	}
+
+	client.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	buf := make([]byte, udpBufferSize)
+	if _, _, err := client.ReadFromUDP(buf); err == nil {
+		t.Fatal("expected fragmented datagram to be dropped")
+	}
+}
+
+func TestUDPAssociateTerminatesOnTCPClose(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	server, client := net.Pipe()
+	defer server.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- handleUDPAssociate(&server) }()
+
+	reply, err := socks5proto.ReadReply(client)
+	if err != nil {
+		t.Fatalf("udp associate reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepSucceeded {
+		t.Fatalf("udp associate rep=%d", reply.Rep)
+	}
+
+	client.Close()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleUDPAssociate did not return after control connection closed")
+	}
+}
+
 func TestMapDialErrorToRep(t *testing.T) {
 	cases := []struct {
 		name string
