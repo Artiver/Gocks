@@ -53,7 +53,7 @@ func chooseProxy(conn *net.Conn) {
 
 	switch buff[0] {
 	case 0x05:
-		go socks5.HandleSocks5Connection(conn, buff)
+		go socks5.HandleSocks5Connection(conn, buff[:n])
 	default:
 		go http.HandleHTTPConnection(conn, buff[:n])
 	}

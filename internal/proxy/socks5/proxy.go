@@ -5,6 +5,7 @@ import (
 	"errors"
 	"gocks/internal/config"
 	"gocks/internal/constant"
+	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 	"log"
 	"net"
@@ -41,89 +42,50 @@ func HandleSocks5Connection(conn *net.Conn, firstBuff []byte) {
 			log.Println(err)
 		}
 	}()
-	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
+
+	var c net.Conn = *conn
+	if len(firstBuff) > 0 {
+		// Replay the bytes pre-read by the mixed-mode dispatcher so the
+		// handshake sees the complete client greeting.
+		c = tunnel.NewPrefixConn(firstBuff, *conn)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
 			log.Println("connection close error", err)
 		}
-	}(*conn)
+	}()
 
-	if err := socks5Handshake(conn, firstBuff); err != nil {
+	clientID, err := socks5Handshake(c)
+	if err != nil {
 		log.Println("Handshake error:", err)
 		return
 	}
+	if clientID != "" {
+		log.Printf("[SOCKS5] client %q from %s", clientID, c.RemoteAddr())
+	}
 
-	if err := socks5HandleRequest(conn); err != nil {
+	if err := socks5HandleRequest(&c); err != nil {
 		log.Println("Request handling error:", err)
 	}
 }
 
-func socks5Handshake(conn *net.Conn, firstBuff []byte) error {
-	if firstBuff == nil {
-		firstBuff = make([]byte, constant.Socks5HandleBytes)
-
-		if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
-			return err
-		}
-		n, err := (*conn).Read(firstBuff)
-		if err != nil || n < 2 {
-			return errors.New("failed to read from client")
-		}
-		if firstBuff[0] != constant.Socks5Version {
-			return errors.New("unsupported SOCKS version")
-		}
+func socks5Handshake(conn net.Conn) (string, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
+		return "", err
 	}
+	return socks5proto.ServerHandshake(conn, newSelector())
+}
 
-	if config.ProxyConfig.Socks5Auth != nil {
-		_, err := (*conn).Write(constant.ResponseAuthUsernamePassword)
-		if err != nil {
-			return err
-		}
-
-		if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
-			return err
-		}
-		n, err := (*conn).Read(firstBuff)
-		if err != nil || n < 2 {
-			return errors.New("failed to read authentication request")
-		}
-
-		if firstBuff[0] != 0x01 {
-			return errors.New("unsupported auth version")
-		}
-
-		usernameLen := int(firstBuff[1])
-		if 2+usernameLen > n {
-			return errors.New("invalid username length")
-		}
-		username := string(firstBuff[2 : 2+usernameLen])
-
-		passwordLen := int(firstBuff[2+usernameLen])
-		if 3+usernameLen+passwordLen > n {
-			return errors.New("invalid password length")
-		}
-		password := string(firstBuff[3+usernameLen : 3+usernameLen+passwordLen])
-
-		if username != config.ProxyConfig.Username || password != config.ProxyConfig.Password {
-			_, err = (*conn).Write(constant.AuthFailed)
-			if err != nil {
-				return err
-			}
-			return errors.New("authentication failed")
-		}
-
-		_, err = (*conn).Write(constant.AuthSuccess)
-		if err != nil {
-			return err
-		}
-	} else {
-		_, err := (*conn).Write(constant.ResponseAuthNone)
-		if err != nil {
-			return err
-		}
+// newSelector builds the authentication selector from the proxy configuration.
+// Authentication is mandatory when credentials were configured via -L.
+func newSelector() socks5proto.Selector {
+	if config.ProxyConfig.Socks5Auth == nil {
+		return socks5proto.NewServerSelector()
 	}
-
-	return nil
+	return socks5proto.NewServerSelector(socks5proto.Credential{
+		Username: config.ProxyConfig.Username,
+		Password: config.ProxyConfig.Password,
+	})
 }
 
 func socks5HandleRequest(conn *net.Conn) error {
