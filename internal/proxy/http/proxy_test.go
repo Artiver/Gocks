@@ -24,7 +24,7 @@ func startProxy(t *testing.T, auth bool) (string, func()) {
 	} else {
 		config.ProxyConfig.AuthEnabled = false
 	}
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -18,7 +18,6 @@ const UdpReceiveTimeout = 3 * time.Second
 const HandshakeTimeout = 10 * time.Second
 const IdleTimeout = 300 * time.Second
 const MaxHeaderBytes = 1 << 20
-const ForwardDialTimeout = 10 * time.Second
 
 // AcceptBackoff is the pause before retrying a failed Accept/ReadFrom.
 const AcceptBackoff = 1 * time.Second

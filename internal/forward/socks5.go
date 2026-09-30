@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-// socks5ClientHandshake negotiates the authentication method with the upstream
-// SOCKS5 server, offering username/password in addition to no-auth when
-// credentials are configured.
-func socks5ClientHandshake(conn net.Conn) error {
+// socks5ClientHandshake negotiates the authentication method with a SOCKS5
+// proxy over conn, offering username/password in addition to no-auth when the
+// hop carries credentials.
+func socks5ClientHandshake(conn net.Conn, hop config.Url) error {
 	methods := []byte{socks5proto.MethodNoAuth}
-	if config.ForwardConfig.Username != "" || config.ForwardConfig.Password != "" {
+	if hop.Username != "" || hop.Password != "" {
 		methods = append(methods, socks5proto.MethodUserPass)
 	}
 
@@ -45,13 +45,13 @@ func socks5ClientHandshake(conn net.Conn) error {
 		return nil
 
 	case socks5proto.MethodUserPass:
-		if config.ForwardConfig.Username == "" && config.ForwardConfig.Password == "" {
+		if hop.Username == "" && hop.Password == "" {
 			return errors.New("socks5: upstream requires authentication but none is configured")
 		}
 		req := socks5proto.NewUserPassRequest(
 			socks5proto.UserPassVersion,
-			config.ForwardConfig.Username,
-			config.ForwardConfig.Password,
+			hop.Username,
+			hop.Password,
 		)
 		if err := req.Write(conn); err != nil {
 			return err
@@ -73,62 +73,54 @@ func socks5ClientHandshake(conn net.Conn) error {
 	}
 }
 
-// DialSocks5ProxyConnection connects to address through the configured upstream
-// SOCKS5 proxy.
-func DialSocks5ProxyConnection(address string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", config.ForwardConfig.BindAddr, constant.TcpConnectTimeout)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := socks5ClientHandshake(conn); err != nil {
-		conn.Close()
-		return nil, err
+// dialSocks5Hop performs the SOCKS5 client handshake with hop over the already
+// established conn and asks it to connect to address.
+func dialSocks5Hop(conn net.Conn, hop config.Url, address string) error {
+	if err := socks5ClientHandshake(conn, hop); err != nil {
+		return err
 	}
 
 	addr, err := socks5proto.NewAddr(address)
 	if err != nil {
-		conn.Close()
-		return nil, err
+		return err
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
-		conn.Close()
-		return nil, err
+		return err
 	}
 	if err := socks5proto.NewRequest(socks5proto.CmdConnect, addr).Write(conn); err != nil {
-		conn.Close()
-		return nil, err
+		return err
 	}
 	// ReadReply frames the reply by address type, so IPv6/domain bound
 	// addresses do not leave trailing bytes on the tunnel stream.
 	reply, err := socks5proto.ReadReply(conn)
 	if err != nil {
-		conn.Close()
-		return nil, err
+		return err
 	}
 	if err := conn.SetDeadline(time.Time{}); err != nil {
-		conn.Close()
-		return nil, err
+		return err
 	}
 
 	if reply.Rep != socks5proto.RepSucceeded {
-		conn.Close()
-		return nil, fmt.Errorf("socks5: upstream connect failed: %s", socks5proto.ReprString(reply.Rep))
+		return fmt.Errorf("socks5: upstream connect failed: %s", socks5proto.ReprString(reply.Rep))
 	}
-	return conn, nil
+	return nil
 }
 
-// DialSocks5UDPAssociate establishes a UDP association with the upstream
-// SOCKS5 server. It returns the TCP control connection that keeps the
-// association alive and the relay address datagrams must be sent to.
-func DialSocks5UDPAssociate() (net.Conn, *socks5proto.Addr, error) {
-	conn, err := net.DialTimeout("tcp", config.ForwardConfig.BindAddr, constant.TcpConnectTimeout)
+// DialSocks5UDPAssociate establishes a UDP association with the SOCKS5 proxy
+// hop. It returns the TCP control connection that keeps the association alive
+// and the relay address datagrams must be sent to.
+//
+// An association is inherently single-hop: the relay address is only
+// meaningful to a client sitting where hop is reachable, so the caller refuses
+// a multi-hop chain before getting here.
+func DialSocks5UDPAssociate(hop config.Url) (net.Conn, *socks5proto.Addr, error) {
+	conn, err := net.DialTimeout("tcp", hop.BindAddr, constant.TcpConnectTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err := socks5ClientHandshake(conn); err != nil {
+	if err := socks5ClientHandshake(conn, hop); err != nil {
 		conn.Close()
 		return nil, nil, err
 	}

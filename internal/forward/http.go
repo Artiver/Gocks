@@ -11,44 +11,33 @@ import (
 	"time"
 )
 
-func DialHTTPProxyConnection(address string) (net.Conn, error) {
-	tcpConn, err := net.DialTimeout("tcp", config.ForwardConfig.BindAddr, constant.ForwardDialTimeout)
-	if err != nil {
-		return nil, err
-	}
-
-	deadline := time.Now().Add(constant.HandshakeTimeout)
-	if err := tcpConn.SetDeadline(deadline); err != nil {
-		tcpConn.Close()
-		return nil, err
+// dialHTTPHop sends a CONNECT request to the HTTP proxy hop over the already
+// established conn, using that hop's own credentials.
+func dialHTTPHop(conn net.Conn, hop config.Url, address string) error {
+	if err := conn.SetDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
+		return err
 	}
 
 	req := &http.Request{
 		Method: constant.ConnectMethod,
 		URL:    &url.URL{Host: address},
 		Host:   address,
-		Header: config.ForwardConfig.HttpAuthHeader,
+		Header: hop.HttpAuthHeader,
 	}
-	if err = req.Write(tcpConn); err != nil {
-		tcpConn.Close()
-		return nil, err
+	if err := req.Write(conn); err != nil {
+		return err
 	}
 
-	resp, err := http.ReadResponse(bufio.NewReader(tcpConn), req)
+	// A proxy answers CONNECT with headers only, and the next hop waits for
+	// our next write, so nothing can be buffered past the response here.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		tcpConn.Close()
-		return nil, err
+		return err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		tcpConn.Close()
-		return nil, errors.New(resp.Status)
+		return errors.New(resp.Status)
 	}
 
-	if err := tcpConn.SetDeadline(time.Time{}); err != nil {
-		tcpConn.Close()
-		return nil, err
-	}
-
-	return tcpConn, nil
+	return conn.SetDeadline(time.Time{})
 }

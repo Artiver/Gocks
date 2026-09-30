@@ -3,6 +3,7 @@ package forward
 import (
 	"io"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 
@@ -97,11 +98,27 @@ func serveUpstream(c net.Conn, opts upstreamOptions) {
 	io.Copy(c, c) // echo whatever the client tunnels
 }
 
-func setForward(bindAddr, username, password string) {
-	config.ForwardConfig.BindAddr = bindAddr
-	config.ForwardConfig.Username = username
-	config.ForwardConfig.Password = password
-	config.ForwardRequired = true
+// socks5Hop builds one chain hop through the real URL parser, so credentials
+// and auth headers match what the command line produces.
+func socks5Hop(t *testing.T, bindAddr, username, password string) config.Url {
+	t.Helper()
+
+	raw := "socks5://" + bindAddr
+	if username != "" || password != "" {
+		raw = "socks5://" + url.QueryEscape(username) + ":" + url.QueryEscape(password) + "@" + bindAddr
+	}
+
+	var hop config.Url
+	if err := config.ParseUrl(raw, &hop); err != nil {
+		t.Fatalf("parse %s: %v", raw, err)
+	}
+	return hop
+}
+
+// dialSingleHop is the classic one-level -F case expressed as a chain.
+func dialSingleHop(t *testing.T, hop config.Url, target string) (net.Conn, error) {
+	t.Helper()
+	return DialThroughChain([]config.Url{hop}, target)
 }
 
 func assertEcho(t *testing.T, conn net.Conn, msg string) {
@@ -125,9 +142,8 @@ func assertEcho(t *testing.T, conn net.Conn, msg string) {
 func TestDialSocks5ProxyConnection(t *testing.T) {
 	target := startTCPEcho(t)
 	upstream := startSocks5Upstream(t, upstreamOptions{})
-	setForward(upstream, "", "")
 
-	conn, err := DialSocks5ProxyConnection(target)
+	conn, err := dialSingleHop(t, socks5Hop(t, upstream, "", ""), target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -141,9 +157,8 @@ func TestDialSocks5ProxyConnectionAuth(t *testing.T) {
 	upstream := startSocks5Upstream(t, upstreamOptions{
 		cred: &socks5proto.Credential{Username: "user", Password: "pass"},
 	})
-	setForward(upstream, "user", "pass")
 
-	conn, err := DialSocks5ProxyConnection(target)
+	conn, err := dialSingleHop(t, socks5Hop(t, upstream, "user", "pass"), target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -157,9 +172,8 @@ func TestDialSocks5ProxyConnectionAuthFailure(t *testing.T) {
 	upstream := startSocks5Upstream(t, upstreamOptions{
 		cred: &socks5proto.Credential{Username: "user", Password: "pass"},
 	})
-	setForward(upstream, "user", "wrong")
 
-	if _, err := DialSocks5ProxyConnection(target); err == nil {
+	if _, err := dialSingleHop(t, socks5Hop(t, upstream, "user", "wrong"), target); err == nil {
 		t.Fatal("expected authentication failure")
 	}
 }
@@ -169,9 +183,8 @@ func TestDialSocks5ProxyConnectionReplyDomain(t *testing.T) {
 	upstream := startSocks5Upstream(t, upstreamOptions{
 		replyAddr: &socks5proto.Addr{Type: socks5proto.AddrDomain, Host: "bnd.example", Port: 1080},
 	})
-	setForward(upstream, "", "")
 
-	conn, err := DialSocks5ProxyConnection(target)
+	conn, err := dialSingleHop(t, socks5Hop(t, upstream, "", ""), target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -187,9 +200,8 @@ func TestDialSocks5ProxyConnectionReplyIPv6(t *testing.T) {
 	upstream := startSocks5Upstream(t, upstreamOptions{
 		replyAddr: &socks5proto.Addr{Type: socks5proto.AddrIPv6, Host: "2001:db8::1", Port: 1080},
 	})
-	setForward(upstream, "", "")
 
-	conn, err := DialSocks5ProxyConnection(target)
+	conn, err := dialSingleHop(t, socks5Hop(t, upstream, "", ""), target)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -201,18 +213,16 @@ func TestDialSocks5ProxyConnectionReplyIPv6(t *testing.T) {
 func TestDialSocks5ProxyConnectionRefused(t *testing.T) {
 	target := startTCPEcho(t)
 	upstream := startSocks5Upstream(t, upstreamOptions{replyRep: socks5proto.RepConnRefused})
-	setForward(upstream, "", "")
 
-	if _, err := DialSocks5ProxyConnection(target); err == nil {
+	if _, err := dialSingleHop(t, socks5Hop(t, upstream, "", ""), target); err == nil {
 		t.Fatal("expected upstream refusal to be reported")
 	}
 }
 
 func TestDialSocks5UDPAssociate(t *testing.T) {
 	upstream := startSocks5Upstream(t, upstreamOptions{})
-	setForward(upstream, "", "")
 
-	ctrl, relay, err := DialSocks5UDPAssociate()
+	ctrl, relay, err := DialSocks5UDPAssociate(socks5Hop(t, upstream, "", ""))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

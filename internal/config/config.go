@@ -19,8 +19,16 @@ type Url struct {
 }
 
 var ProxyConfig Url
-var ForwardConfig Url
-var ForwardRequired bool
+
+// ForwardChain is the ordered list of upstream proxies a dial traverses: the
+// first entry is contacted directly and the last one reaches the final target.
+// One entry reproduces the classic single-level -F behaviour, an empty chain
+// dials directly.
+var ForwardChain []Url
+
+// MaxForwardHops bounds the chain so a misconfigured command line cannot build
+// an unbounded proxy chain.
+const MaxForwardHops = 32
 
 var CRLF = []byte("\r\n")
 var AuthRequiredResponse = []byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Provide Auth Info\"\r\nConnection: close\r\n\r\n")

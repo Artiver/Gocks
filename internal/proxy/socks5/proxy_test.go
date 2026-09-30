@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gocks/internal/config"
+	"gocks/internal/constant"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 )
@@ -288,7 +289,7 @@ func TestHandshakePreservesBufferedBytes(t *testing.T) {
 
 func TestSocks5ConnectEndToEnd(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echoAddr := startEcho(t)
 	proxyAddr := startSocks5Proxy(t)
@@ -312,7 +313,7 @@ func TestSocks5ConnectEndToEnd(t *testing.T) {
 // coalesced with the CONNECT request must survive the request parse.
 func TestSocks5ConnectPipelinedPayload(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echoAddr := startEcho(t)
 	proxyAddr := startSocks5Proxy(t)
@@ -365,7 +366,7 @@ func TestSocks5ConnectPipelinedPayload(t *testing.T) {
 
 func TestSocks5ConnectDomain(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echoAddr := startEcho(t)
 	proxyAddr := startSocks5Proxy(t)
@@ -450,7 +451,7 @@ func TestRequestUnsupportedAddrType(t *testing.T) {
 
 func TestConnectBndAddress(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echoAddr := startEcho(t)
 	proxyAddr := startSocks5Proxy(t)
@@ -473,7 +474,7 @@ func TestConnectBndAddress(t *testing.T) {
 
 func TestConnectFailureRepCode(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	// Reserve a port, then release it so nothing is listening on it.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -522,7 +523,7 @@ func TestConnectFailureRepCode(t *testing.T) {
 
 func TestBindTwoReplies(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 	proxyAddr := startSocks5Proxy(t)
 
 	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
@@ -616,7 +617,7 @@ func TestBindTwoReplies(t *testing.T) {
 
 func TestBindAbortOnControlClose(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	server, client := net.Pipe()
 	defer server.Close()
@@ -739,7 +740,7 @@ func udpRoundTrip(t *testing.T, client *net.UDPConn, relay *socks5proto.Addr, ta
 
 func TestUDPAssociateRoundTrip(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echo := startUDPEcho(t, "127.0.0.1")
 	proxyAddr := startSocks5Proxy(t)
@@ -770,7 +771,7 @@ func TestUDPAssociateRoundTrip(t *testing.T) {
 
 func TestUDPAssociateDomain(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echo := startUDPEcho(t, "localhost")
 	proxyAddr := startSocks5Proxy(t)
@@ -795,7 +796,7 @@ func TestUDPAssociateDomain(t *testing.T) {
 
 func TestUDPAssociateFragDropped(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	echo := startUDPEcho(t, "127.0.0.1")
 	proxyAddr := startSocks5Proxy(t)
@@ -827,7 +828,7 @@ func TestUDPAssociateFragDropped(t *testing.T) {
 
 func TestUDPAssociateTerminatesOnTCPClose(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = false
+	config.ForwardChain = nil
 
 	server, client := net.Pipe()
 	defer server.Close()
@@ -956,14 +957,9 @@ func TestUDPAssociateViaUpstream(t *testing.T) {
 	echo := startUDPEcho(t, "127.0.0.1")
 	upstream := startUDPRelayUpstream(t)
 
-	config.ForwardRequired = true
-	config.ForwardConfig.Scheme = "socks5"
-	config.ForwardConfig.BindAddr = upstream
-	config.ForwardConfig.Username = ""
-	config.ForwardConfig.Password = ""
+	config.ForwardChain = []config.Url{{Scheme: constant.Socks5, BindAddr: upstream}}
 	t.Cleanup(func() {
-		config.ForwardRequired = false
-		config.ForwardConfig = config.Url{}
+		config.ForwardChain = nil
 	})
 
 	proxyAddr := startSocks5Proxy(t)
@@ -987,12 +983,9 @@ func TestUDPAssociateViaUpstream(t *testing.T) {
 
 func TestUDPAssociateUpstreamUnsupported(t *testing.T) {
 	setAuth("", "", false)
-	config.ForwardRequired = true
-	config.ForwardConfig.Scheme = "http"
-	config.ForwardConfig.BindAddr = "127.0.0.1:1"
+	config.ForwardChain = []config.Url{{Scheme: constant.HTTP, BindAddr: "127.0.0.1:1"}}
 	t.Cleanup(func() {
-		config.ForwardRequired = false
-		config.ForwardConfig = config.Url{}
+		config.ForwardChain = nil
 	})
 
 	proxyAddr := startSocks5Proxy(t)

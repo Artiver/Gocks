@@ -9,32 +9,35 @@ import (
 	"net"
 )
 
+// DialTcpConnection connects to address directly, or through the configured
+// chain of upstream proxies when one is set.
 func DialTcpConnection(address string) (net.Conn, error) {
-	if config.ForwardRequired {
-		switch config.ForwardConfig.Scheme {
-		case constant.Socks5:
-			return forward.DialSocks5ProxyConnection(address)
-		case constant.HTTP:
-			return forward.DialHTTPProxyConnection(address)
-		default:
-			return nil, errors.New("forward not supported yet")
-		}
-	} else {
+	if len(config.ForwardChain) == 0 {
 		return net.DialTimeout("tcp", address, constant.TcpConnectTimeout)
 	}
+	return forward.DialThroughChain(config.ForwardChain, address)
 }
 
 // DialUdpAssociation opens a UDP association through the configured upstream
 // proxy. It returns (nil, nil, nil) when no forward proxy is configured, in
 // which case the caller should relay UDP directly.
+//
+// Only a single SOCKS5 hop can carry UDP: the relay address a proxy returns is
+// meaningful to a client that can reach that proxy, which a chain cannot
+// provide, so a longer chain is refused instead of misrouted.
 func DialUdpAssociation() (net.Conn, *socks5proto.Addr, error) {
-	if !config.ForwardRequired {
+	switch len(config.ForwardChain) {
+	case 0:
 		return nil, nil, nil
-	}
-	switch config.ForwardConfig.Scheme {
-	case constant.Socks5:
-		return forward.DialSocks5UDPAssociate()
+
+	case 1:
+		hop := config.ForwardChain[0]
+		if hop.Scheme != constant.Socks5 {
+			return nil, nil, errors.New("udp over this forward scheme is not supported")
+		}
+		return forward.DialSocks5UDPAssociate(hop)
+
 	default:
-		return nil, nil, errors.New("udp over this forward scheme is not supported")
+		return nil, nil, errors.New("udp associate through a forward chain of more than one hop is not supported")
 	}
 }
