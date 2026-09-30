@@ -41,7 +41,11 @@ func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
 		return err
 	}
 
-	return tunnel.TransportData(&targetConn, conn)
+	start := time.Now()
+	stats, err := tunnel.TransportDataStats(&targetConn, conn)
+	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
+		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	return err
 }
 
 // mapDialErrorToRep maps a dial error to the closest SOCKS5 reply code.
@@ -161,7 +165,11 @@ func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {
 	log.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetConn.RemoteAddr())
 
 	var wrapped net.Conn = tunnel.NewReaderConn(br, *conn)
-	return tunnel.TransportData(&targetConn, &wrapped)
+	start := time.Now()
+	stats, err := tunnel.TransportDataStats(&targetConn, &wrapped)
+	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
+		clientAddr, targetConn.RemoteAddr(), time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	return err
 }
 
 // waitForPeer waits until a peer connects, the client disconnects, or the

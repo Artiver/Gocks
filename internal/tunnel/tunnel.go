@@ -22,51 +22,86 @@ func FormatAddress(ip string, port uint16) string {
 	return fmt.Sprintf("%s:%d", ip, port)
 }
 
+// TransportStats reports the bytes copied in each direction.
+type TransportStats struct {
+	SourceToTarget int64
+	TargetToSource int64
+}
+
 // TransportData proxies data bidirectionally between source and target until
-// both directions have finished. It is TransportDataContext with a background
-// context.
+// both directions have finished.
 func TransportData(source, target *net.Conn) error {
-	return TransportDataContext(context.Background(), source, target)
+	_, err := TransportDataStats(source, target)
+	return err
 }
 
 // TransportDataContext proxies data bidirectionally between source and target.
-// Each direction half-closes its destination when it ends, so the peer sees an
-// EOF instead of a stalled connection. When a connection cannot be
-// half-closed it is closed outright, which also unblocks the other direction.
-// Cancelling ctx force-closes both connections.
 func TransportDataContext(ctx context.Context, source, target *net.Conn) error {
+	_, err := TransportDataContextStats(ctx, source, target)
+	return err
+}
+
+// TransportDataStats is TransportData that also reports byte counts.
+func TransportDataStats(source, target *net.Conn) (TransportStats, error) {
+	return TransportDataContextStats(context.Background(), source, target)
+}
+
+// TransportDataContextStats proxies data bidirectionally between source and
+// target and reports byte counts. Each direction half-closes its destination
+// when it ends, so the peer sees an EOF instead of a stalled connection. When
+// a connection cannot be half-closed it is closed outright, which also
+// unblocks the other direction. Cancelling ctx force-closes both connections.
+func TransportDataContextStats(ctx context.Context, source, target *net.Conn) (TransportStats, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	errCh := make(chan error, 2)
-	go func() { errCh <- copyHalf(ctx, *target, *source) }()
-	go func() { errCh <- copyHalf(ctx, *source, *target) }()
+	type result struct {
+		dir int // 0: source->target, 1: target->source
+		n   int64
+		err error
+	}
+	errCh := make(chan result, 2)
+	go func() {
+		n, err := copyHalf(ctx, *target, *source)
+		errCh <- result{0, n, err}
+	}()
+	go func() {
+		n, err := copyHalf(ctx, *source, *target)
+		errCh <- result{1, n, err}
+	}()
 
+	var stats TransportStats
 	var firstErr error
 	completed := 0
+	finish := func(r result) {
+		if r.dir == 0 {
+			stats.SourceToTarget = r.n
+		} else {
+			stats.TargetToSource = r.n
+		}
+		if firstErr == nil && !isBenign(r.err) {
+			firstErr = r.err
+		}
+	}
+
 	for completed < 2 {
 		select {
-		case err := <-errCh:
+		case r := <-errCh:
 			completed++
-			if firstErr == nil && !isBenign(err) {
-				firstErr = err
-			}
+			finish(r)
 		case <-ctx.Done():
 			forceClose(source, target)
 			for completed < 2 {
-				err := <-errCh
+				finish(<-errCh)
 				completed++
-				if firstErr == nil && !isBenign(err) {
-					firstErr = err
-				}
 			}
 			if firstErr != nil {
-				return firstErr
+				return stats, firstErr
 			}
-			return ctx.Err()
+			return stats, ctx.Err()
 		}
 	}
-	return firstErr
+	return stats, firstErr
 }
 
 // isBenign reports whether err is an expected result of a connection ending
@@ -80,18 +115,19 @@ func isBenign(err error) bool {
 }
 
 // copyHalf copies src to dst until EOF or an error, then half-closes dst so
-// the peer observes the end of this direction.
-func copyHalf(ctx context.Context, dst, src net.Conn) error {
+// the peer observes the end of this direction. It returns the bytes written.
+func copyHalf(ctx context.Context, dst, src net.Conn) (int64, error) {
 	defer func() {
 		closeRead(src)
 		closeWrite(dst)
 	}()
 
+	var total int64
 	buf := make([]byte, 32*1024)
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return total, ctx.Err()
 		default:
 		}
 
@@ -104,18 +140,19 @@ func copyHalf(ctx context.Context, dst, src net.Conn) error {
 		nr, er := src.Read(buf)
 		if nr > 0 {
 			nw, ew := dst.Write(buf[:nr])
+			total += int64(nw)
 			if ew != nil {
-				return ew
+				return total, ew
 			}
 			if nw != nr {
-				return io.ErrShortWrite
+				return total, io.ErrShortWrite
 			}
 		}
 		if er != nil {
 			if errors.Is(er, io.EOF) {
-				return nil
+				return total, nil
 			}
-			return er
+			return total, er
 		}
 	}
 }

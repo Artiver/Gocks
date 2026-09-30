@@ -130,6 +130,46 @@ func TestTransportDataFullCloseFallback(t *testing.T) {
 	}
 }
 
+func TestTransportDataStats(t *testing.T) {
+	a, b := net.Pipe()
+	c, d := net.Pipe()
+	defer a.Close()
+	defer c.Close()
+
+	statsCh := make(chan TransportStats, 1)
+	go func() {
+		stats, _ := TransportDataStats(&a, &c)
+		statsCh <- stats
+	}()
+
+	// source -> target
+	go func() { b.Write([]byte("12345")) }()
+	if _, err := io.ReadFull(d, make([]byte, 5)); err != nil {
+		t.Fatal(err)
+	}
+
+	// target -> source
+	go func() { d.Write([]byte("abc")) }()
+	if _, err := io.ReadFull(b, make([]byte, 3)); err != nil {
+		t.Fatal(err)
+	}
+
+	b.Close()
+	d.Close()
+
+	select {
+	case stats := <-statsCh:
+		if stats.SourceToTarget != 5 {
+			t.Fatalf("SourceToTarget=%d want 5", stats.SourceToTarget)
+		}
+		if stats.TargetToSource != 3 {
+			t.Fatalf("TargetToSource=%d want 3", stats.TargetToSource)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TransportDataStats did not return")
+	}
+}
+
 func TestTransportDataContextCancel(t *testing.T) {
 	a, b := net.Pipe()
 	c, d := net.Pipe()
