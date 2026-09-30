@@ -1,0 +1,2 @@
+# Keep Go sources as LF so gofmt is stable regardless of core.autocrlf.
+*.go text eol=lf
