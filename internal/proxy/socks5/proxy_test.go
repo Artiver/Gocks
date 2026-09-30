@@ -2,8 +2,10 @@ package socks5
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
+	"syscall"
 	"testing"
 	"time"
 
@@ -125,8 +127,8 @@ func startSocks5Proxy(t *testing.T) string {
 }
 
 // dialSocks5Connect performs a no-auth handshake and a CONNECT to target,
-// returning the established tunnel connection.
-func dialSocks5Connect(t *testing.T, proxyAddr, target string) net.Conn {
+// returning the established tunnel connection and the server reply.
+func dialSocks5Connect(t *testing.T, proxyAddr, target string) (net.Conn, *socks5proto.Reply) {
 	t.Helper()
 
 	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
@@ -162,7 +164,7 @@ func dialSocks5Connect(t *testing.T, proxyAddr, target string) net.Conn {
 	if reply.Rep != socks5proto.RepSucceeded {
 		t.Fatalf("expected success reply, got rep=%d", reply.Rep)
 	}
-	return conn
+	return conn, reply
 }
 
 func TestHandshakeNoAuth(t *testing.T) {
@@ -294,7 +296,7 @@ func TestSocks5ConnectEndToEnd(t *testing.T) {
 	echoAddr := startEcho(t)
 	proxyAddr := startSocks5Proxy(t)
 
-	conn := dialSocks5Connect(t, proxyAddr, echoAddr)
+	conn, _ := dialSocks5Connect(t, proxyAddr, echoAddr)
 
 	msg := []byte("ping-pong")
 	if _, err := conn.Write(msg); err != nil {
@@ -376,7 +378,7 @@ func TestSocks5ConnectDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conn := dialSocks5Connect(t, proxyAddr, net.JoinHostPort("localhost", port))
+	conn, _ := dialSocks5Connect(t, proxyAddr, net.JoinHostPort("localhost", port))
 
 	msg := []byte("domain-ok")
 	if _, err := conn.Write(msg); err != nil {
@@ -446,5 +448,102 @@ func TestRequestUnsupportedAddrType(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for reply")
+	}
+}
+
+func TestConnectBndAddress(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	echoAddr := startEcho(t)
+	proxyAddr := startSocks5Proxy(t)
+
+	_, reply := dialSocks5Connect(t, proxyAddr, echoAddr)
+
+	if reply.Addr == nil {
+		t.Fatal("missing bound address in reply")
+	}
+	if reply.Addr.Host != "127.0.0.1" {
+		t.Fatalf("expected bound host 127.0.0.1, got %q", reply.Addr.Host)
+	}
+	if reply.Addr.Port == 0 {
+		t.Fatal("expected non-zero bound port")
+	}
+	if reply.Addr.Type != socks5proto.AddrIPv4 {
+		t.Fatalf("expected IPv4 bound address, got type %d", reply.Addr.Type)
+	}
+}
+
+func TestConnectFailureRepCode(t *testing.T) {
+	setAuth("", "", false)
+	config.ForwardRequired = false
+
+	// Reserve a port, then release it so nothing is listening on it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := ln.Addr().String()
+	ln.Close()
+
+	proxyAddr := startSocks5Proxy(t)
+
+	conn, err := net.DialTimeout("tcp", proxyAddr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if method := readMethodReply(t, conn); method != 0x00 {
+		t.Fatalf("expected no-auth method, got %d", method)
+	}
+
+	addr, err := socks5proto.NewAddr(deadAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req bytes.Buffer
+	if err := socks5proto.NewRequest(socks5proto.CmdConnect, addr).Write(&req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(req.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	reply, err := socks5proto.ReadReply(conn)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	if reply.Rep != socks5proto.RepConnRefused {
+		t.Fatalf("expected RepConnRefused, got %d", reply.Rep)
+	}
+}
+
+func TestMapDialErrorToRep(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want byte
+	}{
+		{"nil", nil, socks5proto.RepSucceeded},
+		{"refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, socks5proto.RepConnRefused},
+		{"host-unreachable", &net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}, socks5proto.RepHostUnreachable},
+		{"net-unreachable", &net.OpError{Op: "dial", Err: syscall.ENETUNREACH}, socks5proto.RepNetUnreachable},
+		{"timeout", &net.DNSError{Err: "i/o timeout", IsTimeout: true}, socks5proto.RepTTLExpired},
+		{"text-refused", errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), socks5proto.RepConnRefused},
+		{"text-no-route", errors.New("dial tcp: no route to host"), socks5proto.RepHostUnreachable},
+		{"other", errors.New("some dial failure"), socks5proto.RepFailure},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapDialErrorToRep(tc.err); got != tc.want {
+				t.Fatalf("mapDialErrorToRep=%d want %d", got, tc.want)
+			}
+		})
 	}
 }
