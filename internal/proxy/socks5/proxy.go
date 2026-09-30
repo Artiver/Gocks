@@ -1,8 +1,8 @@
 package socks5
 
 import (
-	"encoding/binary"
 	"errors"
+	"fmt"
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	socks5proto "gocks/internal/protocol/socks5"
@@ -89,68 +89,43 @@ func newSelector() socks5proto.Selector {
 }
 
 func socks5HandleRequest(conn *net.Conn) error {
-	buf := make([]byte, constant.Socks5HandleBytes)
-
 	if err := (*conn).SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}
-	n, err := (*conn).Read(buf)
-	if err != nil || n < 7 {
-		return errors.New("failed to read request")
+
+	// ReadRequest frames the request exactly, so any payload the client sent
+	// right after it stays in the socket and is forwarded by the command
+	// handler instead of being discarded.
+	req, err := socks5proto.ReadRequest(*conn)
+	if err != nil {
+		if errors.Is(err, socks5proto.ErrBadAddrType) {
+			if werr := writeReply(conn, socks5proto.RepAddrUnsupported); werr != nil {
+				log.Println("write reply error:", werr)
+			}
+		}
+		return err
 	}
+
 	if err := (*conn).SetReadDeadline(time.Time{}); err != nil {
 		return err
 	}
 
-	if buf[0] != constant.Socks5Version {
-		return errors.New("unsupported SOCKS version")
-	}
-
-	targetAddr, err := handleRequestAddr(buf, n)
-	if err != nil {
-		return err
-	}
-
-	cmd := buf[1]
-	switch cmd {
-	case constant.CmdConnect:
-		return handleConnect(conn, targetAddr)
-	case constant.CmdBind:
-		return handleBind(conn, targetAddr)
-	case constant.CmdUDP:
+	switch req.Cmd {
+	case socks5proto.CmdConnect:
+		return handleConnect(conn, req.Addr)
+	case socks5proto.CmdBind:
+		return handleBind(conn, req.Addr)
+	case socks5proto.CmdUDP:
 		return handleUDPAssociate(conn)
 	default:
-		return errors.New("unsupported command")
+		if werr := writeReply(conn, socks5proto.RepCmdUnsupported); werr != nil {
+			log.Println("write reply error:", werr)
+		}
+		return fmt.Errorf("unsupported command %d", req.Cmd)
 	}
 }
 
-func handleRequestAddr(buf []byte, n int) (string, error) {
-	addrType := buf[3]
-	var addr string
-	var port uint16
-
-	switch addrType {
-	case constant.AddrIPv4:
-		if n < 10 {
-			return "", errors.New("invalid IPv4 address")
-		}
-		addr = net.IP(buf[4:8]).String()
-		port = binary.BigEndian.Uint16(buf[8:10])
-	case constant.AddrIPv6:
-		if n < 22 {
-			return "", errors.New("invalid IPv6 address")
-		}
-		addr = net.IP(buf[4:20]).String()
-		port = binary.BigEndian.Uint16(buf[20:22])
-	case constant.AddrDomain:
-		addrLen := int(buf[4])
-		if 5+addrLen+2 > n {
-			return "", errors.New("invalid domain address")
-		}
-		addr = string(buf[5 : 5+addrLen])
-		port = binary.BigEndian.Uint16(buf[5+addrLen : 7+addrLen])
-	default:
-		return "", errors.New("unsupported address type")
-	}
-	return tunnel.FormatAddress(addr, port), nil
+// writeReply sends a reply carrying no bound address.
+func writeReply(conn *net.Conn, rep byte) error {
+	return socks5proto.NewReply(rep, nil).Write(*conn)
 }

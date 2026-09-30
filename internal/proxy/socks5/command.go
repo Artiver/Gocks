@@ -6,18 +6,19 @@ import (
 	"errors"
 	"gocks/internal/constant"
 	"gocks/internal/dialer"
+	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 	"io"
 	"log"
 	"net"
 )
 
-func handleConnect(conn *net.Conn, targetAddr string) error {
+func handleConnect(conn *net.Conn, addr *socks5proto.Addr) error {
+	targetAddr := addr.String()
 	targetConn, err := dialer.DialTcpConnection(targetAddr)
 
 	if err != nil {
-		_, err1 := (*conn).Write(constant.ConnectFailed)
-		if err1 != nil {
+		if err1 := writeReply(conn, socks5proto.RepFailure); err1 != nil {
 			return err1
 		}
 		return err
@@ -32,18 +33,18 @@ func handleConnect(conn *net.Conn, targetAddr string) error {
 	clientAddr := (*conn).RemoteAddr().String()
 	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
-	_, err = (*conn).Write(constant.ConnectSuccess)
-	if err != nil {
+	if err := writeReply(conn, socks5proto.RepSucceeded); err != nil {
 		return err
 	}
 
 	return tunnel.TransportData(&targetConn, conn)
 }
 
-func handleBind(conn *net.Conn, targetAddr string) error {
+func handleBind(conn *net.Conn, addr *socks5proto.Addr) error {
+	targetAddr := addr.String()
 	listener, err := net.Listen("tcp", targetAddr)
 	if err != nil {
-		if _, werr := (*conn).Write(constant.ConnectRefused); werr != nil {
+		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
 			return werr
 		}
 		return err
@@ -62,7 +63,7 @@ func handleBind(conn *net.Conn, targetAddr string) error {
 
 	targetConn, err := listener.Accept()
 	if err != nil {
-		if _, werr := (*conn).Write(constant.ConnectFailed); werr != nil {
+		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
 			return werr
 		}
 		return err
