@@ -261,6 +261,37 @@ func handleUDPAssociate(conn *net.Conn) error {
 	}
 	defer clientConn.Close()
 
+	// Optionally chain the association through an upstream SOCKS5 proxy.
+	// This happens before the success reply so a failure is reported properly.
+	control, relayAddr, err := dialer.DialUdpAssociation()
+	if err != nil {
+		if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
+			return werr
+		}
+		return err
+	}
+	var upstreamConn *net.UDPConn
+	if control != nil {
+		upAddr, err := net.ResolveUDPAddr("udp", relayAddr.String())
+		if err != nil {
+			control.Close()
+			if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
+				return werr
+			}
+			return err
+		}
+		upstreamConn, err = net.DialUDP("udp", nil, upAddr)
+		if err != nil {
+			control.Close()
+			if werr := writeReply(conn, socks5proto.RepFailure); werr != nil {
+				return werr
+			}
+			return err
+		}
+		defer upstreamConn.Close()
+		defer control.Close()
+	}
+
 	bound := clientConn.LocalAddr().(*net.UDPAddr)
 	replyHost := bindIP.String()
 	if bindIP.IsUnspecified() && ok && tcpLocal.IP != nil {
@@ -277,7 +308,12 @@ func handleUDPAssociate(conn *net.Conn) error {
 	if remote, ok := (*conn).RemoteAddr().(*net.TCPAddr); ok {
 		clientIP = remote.IP
 	}
-	log.Printf("[SOCKS5] [UDP] %s relay on %s", (*conn).RemoteAddr(), bound)
+	if upstreamConn != nil {
+		log.Printf("[SOCKS5] [UDP] %s relay on %s via upstream %s",
+			(*conn).RemoteAddr(), bound, upstreamConn.RemoteAddr())
+	} else {
+		log.Printf("[SOCKS5] [UDP] %s relay on %s", (*conn).RemoteAddr(), bound)
+	}
 
 	// The association lives as long as the TCP control connection.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -298,9 +334,10 @@ func handleUDPAssociate(conn *net.Conn) error {
 	}()
 
 	r := &udpRelay{
-		clientConn: clientConn,
-		clientIP:   clientIP,
-		sessions:   make(map[string]*udpSession),
+		clientConn:   clientConn,
+		clientIP:     clientIP,
+		upstreamConn: upstreamConn,
+		sessions:     make(map[string]*udpSession),
 	}
 	r.run(ctx)
 	return nil
@@ -313,16 +350,30 @@ type udpSession struct {
 	client *net.UDPAddr
 }
 
-// udpRelay fans client datagrams out to per-target upstream sockets and
-// frames the responses back to the client.
+// udpRelay fans client datagrams out to per-target upstream sockets (direct)
+// or to a single upstream SOCKS5 relay, and frames responses back to the
+// client.
 type udpRelay struct {
 	clientConn *net.UDPConn
 	clientIP   net.IP
+
+	// upstreamConn is set when relaying through an upstream SOCKS5 proxy.
+	upstreamConn *net.UDPConn
+
 	mu         sync.Mutex
+	clientAddr *net.UDPAddr
 	sessions   map[string]*udpSession
 }
 
 func (r *udpRelay) run(ctx context.Context) {
+	if r.upstreamConn != nil {
+		r.runUpstream(ctx)
+		return
+	}
+	r.runDirect(ctx)
+}
+
+func (r *udpRelay) runDirect(ctx context.Context) {
 	defer r.closeAll()
 
 	buf := make([]byte, udpBufferSize)
@@ -368,6 +419,77 @@ func (r *udpRelay) run(ctx context.Context) {
 		}
 		if _, err := session.conn.Write(dgram.Data); err != nil {
 			log.Printf("[SOCKS5] [UDP] forward to %s: %v", target, err)
+		}
+	}
+}
+
+// runUpstream relays whole SOCKS5 datagrams through a single upstream relay,
+// which resolves and forwards them to the final targets. The client-provided
+// header is preserved verbatim, so only the transport changes.
+func (r *udpRelay) runUpstream(ctx context.Context) {
+	go func() {
+		<-ctx.Done()
+		r.upstreamConn.Close()
+	}()
+
+	// upstream -> client
+	go func() {
+		ubuf := make([]byte, udpBufferSize)
+		for {
+			if err := r.upstreamConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+				return
+			}
+			n, err := r.upstreamConn.Read(ubuf)
+			if err != nil {
+				return
+			}
+			r.mu.Lock()
+			client := r.clientAddr
+			r.mu.Unlock()
+			if client == nil {
+				continue
+			}
+			if _, err := r.clientConn.WriteToUDP(ubuf[:n], client); err != nil {
+				return
+			}
+		}
+	}()
+
+	// client -> upstream
+	buf := make([]byte, udpBufferSize)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+			return
+		}
+		n, src, err := r.clientConn.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		if !src.IP.Equal(r.clientIP) {
+			continue
+		}
+
+		var dgram socks5proto.UDPDatagram
+		if err := dgram.Unmarshal(buf[:n]); err != nil {
+			log.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
+			continue
+		}
+		if dgram.Header.Frag != 0 {
+			continue
+		}
+
+		r.mu.Lock()
+		r.clientAddr = src
+		r.mu.Unlock()
+
+		if _, err := r.upstreamConn.Write(buf[:n]); err != nil {
+			return
 		}
 	}
 }
