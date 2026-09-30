@@ -79,7 +79,7 @@ func socks5Handshake(conn net.Conn) (string, error) {
 // newSelector builds the authentication selector from the proxy configuration.
 // Authentication is mandatory when credentials were configured via -L.
 func newSelector() socks5proto.Selector {
-	if config.ProxyConfig.Socks5Auth == nil {
+	if !config.ProxyConfig.AuthEnabled {
 		return socks5proto.NewServerSelector()
 	}
 	return socks5proto.NewServerSelector(socks5proto.Credential{

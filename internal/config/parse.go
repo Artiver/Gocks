@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"fmt"
 	"gocks/internal/constant"
 	"net/http"
 	"net/url"
@@ -27,17 +28,17 @@ func ParseUrl(str string, arg *Url) error {
 	arg.BindAddr = host
 	arg.HttpAuthHeader = http.Header{}
 	arg.HttpAuthHeader.Set(constant.ProxyConnectKey, constant.ProxyConnectValue)
-	if username != "" && password != "" {
-		arg.Socks5Auth = []byte{0x01}
-		arg.Socks5Auth = append(arg.Socks5Auth, byte(len(username)))
-		arg.Socks5Auth = append(arg.Socks5Auth, username...)
-		arg.Socks5Auth = append(arg.Socks5Auth, byte(len(password)))
-		arg.Socks5Auth = append(arg.Socks5Auth, password...)
-		arg.HttpAuthHeader.Set(constant.BasicAuthHeader, constant.BasicAuthPrefix+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+	if username != "" {
+		// RFC 1929 limits both fields to 255 bytes.
+		if len(username) > 255 || len(password) > 255 {
+			return fmt.Errorf("username and password must be at most 255 bytes")
+		}
 		arg.Username = username
 		arg.Password = password
+		arg.AuthEnabled = true
+		arg.HttpAuthHeader.Set(constant.BasicAuthHeader, constant.BasicAuthPrefix+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 	} else {
-		arg.Socks5Auth = nil
+		arg.AuthEnabled = false
 	}
 	arg.TranAddr = strings.TrimPrefix(u.Path, "/")
 	return nil

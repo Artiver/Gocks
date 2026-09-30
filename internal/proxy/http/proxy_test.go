@@ -20,9 +20,9 @@ func startProxy(t *testing.T, auth bool) (string, func()) {
 	if auth {
 		config.ProxyConfig.Username = "testuser"
 		config.ProxyConfig.Password = "testpass"
-		config.ProxyConfig.Socks5Auth = []byte{0x01}
+		config.ProxyConfig.AuthEnabled = true
 	} else {
-		config.ProxyConfig.Socks5Auth = nil
+		config.ProxyConfig.AuthEnabled = false
 	}
 	config.ForwardRequired = false
 

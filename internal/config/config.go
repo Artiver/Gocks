@@ -13,7 +13,8 @@ type Url struct {
 	BindAddr string
 	TranAddr string
 	AuthInfo
-	Socks5Auth     []byte
+	// AuthEnabled reports whether credentials were configured for this endpoint.
+	AuthEnabled    bool
 	HttpAuthHeader http.Header
 }
 

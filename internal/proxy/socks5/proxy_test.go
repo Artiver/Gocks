@@ -17,11 +17,7 @@ import (
 func setAuth(username, password string, enabled bool) {
 	config.ProxyConfig.Username = username
 	config.ProxyConfig.Password = password
-	if enabled {
-		config.ProxyConfig.Socks5Auth = []byte{0x01}
-	} else {
-		config.ProxyConfig.Socks5Auth = nil
-	}
+	config.ProxyConfig.AuthEnabled = enabled
 }
 
 // runHandshake exercises socks5Handshake on one end of a net.Pipe while the

@@ -94,7 +94,7 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 		return true, err
 	}
 
-	if config.ProxyConfig.Socks5Auth != nil {
+	if config.ProxyConfig.AuthEnabled {
 		if !checkProxyAuthorizationFromHeader(req.Header) {
 			_, err := conn.Write(config.AuthRequiredResponse)
 			if err != nil {
