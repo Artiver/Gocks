@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"gocks/internal/config"
 	"gocks/internal/constant"
@@ -10,6 +11,9 @@ import (
 	"gocks/internal/transport/tcp"
 	"gocks/internal/transport/udp"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 var proxyAddr string
@@ -25,16 +29,26 @@ func init() {
 
 func main() {
 	config.ParseArgsInfo(proxyAddr, forwardAddr)
+
+	// Shut down cleanly on Ctrl+C / SIGTERM by cancelling the run context.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var err error
 	switch config.ProxyConfig.Scheme {
 	case constant.Socks5:
-		socks5.Run()
+		err = socks5.Run(ctx)
 	case constant.HTTP:
-		http.Run()
+		err = http.Run(ctx)
 	case constant.TCP:
-		tcp.Run()
+		err = tcp.Run(ctx)
 	case constant.UDP:
-		udp.Run()
+		err = udp.Run(ctx)
 	default:
-		mix.Run()
+		err = mix.Run(ctx)
 	}
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println("shutdown complete")
 }

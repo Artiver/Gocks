@@ -20,6 +20,9 @@ const IdleTimeout = 300 * time.Second
 const MaxHeaderBytes = 1 << 20
 const ForwardDialTimeout = 10 * time.Second
 
+// AcceptBackoff is the pause before retrying a failed Accept/ReadFrom.
+const AcceptBackoff = 1 * time.Second
+
 const BasicAuthHeader = "Proxy-Authorization"
 const BasicAuthPrefix = "Basic "
 

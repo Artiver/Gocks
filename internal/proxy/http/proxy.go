@@ -2,10 +2,12 @@ package http
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	"gocks/internal/dialer"
+	"gocks/internal/netutil"
 	"gocks/internal/tunnel"
 	"io"
 	"log"
@@ -15,24 +17,31 @@ import (
 	"time"
 )
 
-func Run() {
+// Run serves HTTP proxying until ctx is cancelled.
+func Run(ctx context.Context) error {
 	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
 	if err != nil {
-		log.Fatalln("Error listening:", err)
+		return err
 	}
-	defer func(listen net.Listener) {
-		err = listen.Close()
-		if err != nil {
-			log.Println("listening close error", err)
-		}
-	}(listen)
+	defer listen.Close()
+
+	go func() {
+		<-ctx.Done()
+		listen.Close()
+	}()
 
 	log.Println("HTTP proxy listening", config.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			log.Println("Error accepting connection:", err)
+			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
+				return nil
+			}
 			continue
 		}
 

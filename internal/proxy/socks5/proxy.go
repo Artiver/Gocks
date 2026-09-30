@@ -1,10 +1,12 @@
 package socks5
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"gocks/internal/config"
 	"gocks/internal/constant"
+	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 	"log"
@@ -12,24 +14,31 @@ import (
 	"time"
 )
 
-func Run() {
+// Run serves SOCKS5 until ctx is cancelled.
+func Run(ctx context.Context) error {
 	listen, err := net.Listen("tcp", config.ProxyConfig.BindAddr)
 	if err != nil {
-		log.Fatalln("Error listening:", err)
+		return err
 	}
-	defer func(listen net.Listener) {
-		err = listen.Close()
-		if err != nil {
-			log.Println("listening close error", err)
-		}
-	}(listen)
+	defer listen.Close()
+
+	go func() {
+		<-ctx.Done()
+		listen.Close()
+	}()
 
 	log.Println("SOCKS5 proxy listening", config.ProxyConfig.BindAddr)
 
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			log.Println("Error accepting connection:", err)
+			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
+				return nil
+			}
 			continue
 		}
 		go HandleSocks5Connection(&conn, nil)

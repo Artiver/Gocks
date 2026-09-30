@@ -1,25 +1,28 @@
 package udp
 
 import (
+	"context"
 	"errors"
 	"gocks/internal/config"
 	"gocks/internal/constant"
+	"gocks/internal/netutil"
 	"log"
 	"net"
 	"time"
 )
 
-func Run() {
+// Run forwards UDP to the configured target until ctx is cancelled.
+func Run(ctx context.Context) error {
 	listen, err := net.ListenPacket("udp", config.ProxyConfig.BindAddr)
 	if err != nil {
-		log.Fatalln("Error listening:", err)
+		return err
 	}
-	defer func(listen net.PacketConn) {
-		err = listen.Close()
-		if err != nil {
-			log.Println("listening close error", err)
-		}
-	}(listen)
+	defer listen.Close()
+
+	go func() {
+		<-ctx.Done()
+		listen.Close()
+	}()
 
 	log.Println("UDP port listening", config.ProxyConfig.BindAddr)
 
@@ -27,7 +30,13 @@ func Run() {
 		buffer := make([]byte, constant.UdpReadBytes)
 		size, clientAddr, err := listen.ReadFrom(buffer)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			log.Printf("Failed to read from client connection: %v", err)
+			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
+				return nil
+			}
 			continue
 		}
 

@@ -2,6 +2,7 @@ package socks5
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -1025,6 +1026,28 @@ func TestUDPAssociateUpstreamUnsupported(t *testing.T) {
 	}
 	if reply.Rep == socks5proto.RepSucceeded {
 		t.Fatal("expected failure for unsupported upstream UDP")
+	}
+}
+
+func TestRunGracefulShutdown(t *testing.T) {
+	setAuth("", "", false)
+	config.ProxyConfig.BindAddr = "127.0.0.1:0"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx) }()
+
+	// Give Run a moment to bind and enter the accept loop.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
 	}
 }
 
