@@ -6,7 +6,7 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 
 # 特性
 
-- TCP端口转发
+- TCP端口转发，支持多级代理链
 - UDP端口转发
 - HTTP代理（Basic认证，支持 Keep-Alive 连接复用）
 - Socks5代理
@@ -15,8 +15,6 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
   - 按 RFC1928 进行方法协商与错误码返回
 - 混合代理（同一端口同时接受 HTTP 与 Socks5）
 - 上游 HTTP/Socks5 代理，支持多级代理链（多个 `-F`），每跳独立协议与认证
-- `-F` 对代理模式与 TCP 端口转发同样生效
-- UDP 关联经单级上游转发（多级链不支持 UDP）
 - 空闲超时（5 分钟无数据即断开）、半关闭透传，SIGINT/SIGTERM 优雅退出
 
 # 目录
@@ -32,7 +30,6 @@ Gocks/
 │   ├── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）+ ReaderConn
 │   ├── netutil/                   # 网络小工具（可取消的 Sleep）
 │   ├── server/                    # 共用的 TCP accept 循环（优雅退出 + 退避重试）
-│   ├── testsupport/               # 测试桩（TCP echo / SOCKS5 上游 / TargetLog）
 │   ├── dialer/                    # 统一拨号入口（TCP/UDP 上游）
 │   ├── forward/                   # 上游代理拨号（forward.go 链式调度, http.go, socks5.go）
 │   ├── proxy/                     # 代理协议
@@ -91,34 +88,13 @@ Gocks_windows_amd64.exe -L socks5://:8080 -F http://192.168.200.1:8080
 
 # 开启HTTP代理，并将其转发给上游需认证的socks5代理
 Gocks_windows_amd64.exe -L http://:8080 -F socks5://admin:admin@192.168.200.1:8080
+
+# 开启socks5+http代理，并将按顺序依次转发给上游的P1代理、P2代理、P3代理，跳数上限为 32
+Gocks_windows_amd64.exe -L :8080 -F socks5://user1:pass1@P1:1080 -F http://user2:pass2@P2:8080 -F socks5://P3:1080
+Gocks_windows_amd64.exe -L :8080 -F "socks5://user1:pass1@P1:1080,http://user2:pass2@P2:8080,socks5://P3:1080"
 ```
 
 代理协议、上游协议、是否认证均可自由搭配使用。
-
-### 多级代理链
-
-`-F` 可重复使用（或用逗号分隔写在一个 `-F` 里），**顺序为从近到远**：第一个 `-F` 最先连接，最后一个 `-F` 负责连接最终目标。每一跳都使用自己 URL 中的协议与认证信息，互不共享。
-
-```shell
-# 三级代理链：client → :8080 → P1 → P2 → P3 → 目标
-Gocks_windows_amd64.exe -L socks5://:8080 \
-  -F socks5://user1:pass1@P1:1080 \
-  -F http://user2:pass2@P2:8080 \
-  -F socks5://P3:1080
-
-# 与上例等价：逗号分隔写法，密码中的逗号需写成 %2C
-Gocks_windows_amd64.exe -L socks5://:8080 -F "socks5://user1:pass1@P1:1080,http://user2:pass2@P2:8080,socks5://P3:1080"
-
-# 启动日志会打印解析后的链路顺序，便于核对（不打印密码）
-# forward chain: [0] socks5://P1:1080 -> [1] http://P2:8080 -> [2] socks5://P3:1080 -> target
-```
-
-说明：
-
-- 启动时若某跳缺少协议前缀或协议不受支持，会直接报错退出并指出是第几跳，不会等到拨号时才失败。
-- 链路中任一跳失败都会关闭整条连接，日志与返回错误中带有 `hop[i]` 定位。
-- 跳数上限为 32；`-F ""` 仍表示不使用上游。
-- UDP ASSOCIATE 只支持单级上游（中转地址只在能直达该代理的网络位置上有效），多级链下的 UDP 请求会被明确拒绝。
 
 # 参考
 
