@@ -13,7 +13,7 @@
 - `protocol/socks5`：整条 `io.Reader/io.Writer` 流式编解码链（`Addr.ReadFrom/WriteTo`、
   `UDPHeader.ReadFrom/WriteTo`、`UDPDatagram.ReadFrom/WriteTo`）。生产路径只用
   字节切片版本（`Encode/Decode/Marshal/Unmarshal`），流式版本只有自己的单测在用，
-  其中 `UDPDatagram.ReadFrom` 还带着未使用的 gost UDP-over-TCP 扩展。
+  其中 `UDPDatagram.ReadFrom` 还带着未使用的 UDP-over-TCP 扩展。
   保留 `Addr.readBody`——`ReadRequest/ReadReply` 的精确分帧依赖它
 
 ## 消除重复
@@ -58,7 +58,7 @@
 
 # 2026.9.30
 
-参考 gost 重写 SOCKS5 实现，按阶段提交，每个阶段附带单元测试。
+重写 SOCKS5 实现，按阶段提交，每个阶段附带单元测试。
 
 ## 新增：internal/protocol/socks5 编解码层
 - 方法协商、RFC1929 认证、地址（IPv4/IPv6/域名）、请求/响应、UDP 报文
@@ -105,7 +105,7 @@
 # 2026.9.21
 
 1. Keep-Alive 连接复用 (http/proxy.go)
-参考 gost 的 handleProxy 循环，在同一条 TCP 连接上依次处理多个 HTTP 请求。使用 http.ReadRequest/http.ReadResponse 正确解析请求/响应边界，通过 shouldCloseConnection 判断 HTTP/1.0 和 HTTP/1.1 的 Connection 头语义。
+在同一条 TCP 连接上依次处理多个 HTTP 请求。使用 http.ReadRequest/http.ReadResponse 正确解析请求/响应边界，通过 shouldCloseConnection 判断 HTTP/1.0 和 HTTP/1.1 的 Connection 头语义。
 
 2. 请求头规范化处理 (http/proxy.go)
 删除 Proxy-Authorization 和 Proxy-Connection 等 hop-by-hop 头，避免泄露给目标服务器

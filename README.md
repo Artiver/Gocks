@@ -9,12 +9,9 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 - TCP端口转发，支持多级代理链
 - UDP端口转发
 - HTTP代理（Basic认证，支持 Keep-Alive 连接复用）
-- Socks5代理
-  - CONNECT / BIND / UDP ASSOCIATE
-  - 用户密码认证（RFC1929，常量时间比较）
-  - 按 RFC1928 进行方法协商与错误码返回
-- 混合代理（同一端口同时接受 HTTP 与 Socks5）
-- 上游 HTTP/Socks5 代理，支持多级代理链（多个 `-F`），每跳独立协议与认证
+- Socks5代理（CONNECT / BIND / UDP ASSOCIATE）
+- 混合代理（同一端口同时接受 HTTP 与 Socks5 请求）
+- 支持多级代理链（多个 `-F`），每跳独立协议与认证
 - 空闲超时（5 分钟无数据即断开）、半关闭透传，SIGINT/SIGTERM 优雅退出
 
 # 目录
@@ -78,7 +75,7 @@ UDP 端口转发为直连转发（每次请求新建一个上游 socket，等待
 Gocks_windows_amd64.exe
 
 # 绑定IP端口，socks5+http代理，不认证
-Gocks_windows_amd64.exe -L mix://192.168.100.1:8080
+Gocks_windows_amd64.exe -L 192.168.100.1:8080
 
 # 绑定IP端口，socks5+http代理，认证
 Gocks_windows_amd64.exe -L mix://username:password@192.168.100.1:8080
