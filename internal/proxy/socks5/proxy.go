@@ -128,3 +128,12 @@ func writeBndReply(conn net.Conn, rep byte, bnd net.Addr) error {
 	}
 	return writeReply(conn, rep, addr)
 }
+
+// failReply reports a generic failure to the client and returns err, unless the
+// reply itself could not be delivered.
+func failReply(conn net.Conn, err error) error {
+	if werr := writeReply(conn, socks5proto.RepFailure, nil); werr != nil {
+		return werr
+	}
+	return err
+}
