@@ -1,5 +1,4 @@
 
-
 # 简介
 
 http/socks5代理工具，支持上游代理，支持端口转发，请在授权的安全测试活动下使用。
@@ -12,7 +11,7 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 - Socks5代理（CONNECT / BIND / UDP ASSOCIATE）
 - 混合代理（同一端口同时接受 HTTP 与 Socks5 请求）
 - 支持多级代理链（多个 `-F`），每跳独立协议与认证
-- 空闲超时（5 分钟无数据即断开）、半关闭透传，SIGINT/SIGTERM 优雅退出
+- 空闲超时（5 分钟无数据即断开），SIGINT/SIGTERM 优雅退出
 
 # 目录
 
@@ -20,22 +19,22 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 Gocks/
 ├── cmd/gocks/main.go              # CLI 入口（SIGINT/SIGTERM 优雅退出）
 ├── internal/
-│   ├── constant/                  # 协议/超时常量（protocol.go）
 │   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
-│   ├── protocol/socks5/           # SOCKS5 编解码与服务端握手
-│   │                              #   codec/method/auth/addr/request/reply/udp/server
-│   ├── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）+ ReaderConn
-│   ├── netutil/                   # 网络小工具（可取消的 Sleep）
-│   ├── server/                    # 共用的 TCP accept 循环（优雅退出 + 退避重试）
+│   ├── constant/                  # 协议/超时常量（protocol.go）
 │   ├── dialer/                    # 统一拨号入口（TCP/UDP 上游）
 │   ├── forward/                   # 上游代理拨号（forward.go 链式调度, http.go, socks5.go）
+│   ├── netutil/                   # 网络小工具（可取消的 Sleep）
+│   ├── protocol/socks5/           # SOCKS5 编解码与服务端握手
+│   │                              #   codec/method/auth/addr/request/reply/udp/server
 │   ├── proxy/                     # 代理协议
 │   │   ├── http/                  #   HTTP 代理
-│   │   ├── socks5/                #   SOCKS5 代理（CONNECT/BIND/UDP）
-│   │   └── mix/                   #   混合代理
-│   └── transport/                 # 端口转发
-│       ├── tcp/                   #   经 dialer 拨号，因此同样遵守 -F
-│       └── udp/
+│   │   ├── mix/                   #   混合代理
+│   │   └── socks5/                #   SOCKS5 代理（CONNECT/BIND/UDP）
+│   ├── server/                    # 共用的 TCP accept 循环（优雅退出 + 退避重试）
+│   ├── transport/                 # 端口转发
+│   │   ├── tcp/                   #   经 dialer 拨号，因此同样遵守 -F
+│   │   └── udp/
+│   └── tunnel/                    # 数据透传核心（半关闭/超时/字节统计）+ ReaderConn
 ├── go.mod                         # module gocks
 └── Makefile                       # 构建路径 → ./cmd/gocks
 ```
@@ -73,6 +72,7 @@ UDP 端口转发为直连转发（每次请求新建一个上游 socket，等待
 ```shell
 # 全零监听，端口8181，socks5+http代理，不认证
 Gocks_windows_amd64.exe
+Gocks_windows_amd64.exe -L :8181
 
 # 绑定IP端口，socks5+http代理，不认证
 Gocks_windows_amd64.exe -L 192.168.100.1:8080
