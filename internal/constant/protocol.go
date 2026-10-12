@@ -23,11 +23,13 @@ const UdpReceiveTimeout = 3 * time.Second
 // for a client's opening message.
 const HandshakeTimeout = 10 * time.Second
 
-// IdleTimeout bounds how long a connection may make no progress. It is used as
-// a read deadline before every read, both while a handshake is in flight and
-// while data is being relayed, so an idle tunnel is closed after 5 minutes
-// rather than held open forever.
-const IdleTimeout = 300 * time.Second
+// IdleTimeout bounds how long a tunnel may make no progress on either
+// direction. The deadline is tracked across both halves of the connection:
+// any data flowing one way refreshes the timer for the whole tunnel, so an
+// asymmetric flow like a large download (silent client->target half) is not
+// cut off while bytes are still arriving on the other half. Only when neither
+// side moves for the full window is the tunnel closed.
+var IdleTimeout = 300 * time.Second
 
 // AcceptBackoff is the pause before retrying a failed Accept/ReadFrom.
 const AcceptBackoff = 1 * time.Second

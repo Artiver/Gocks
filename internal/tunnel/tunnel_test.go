@@ -5,12 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gocks/internal/constant"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// newLastActivity returns a shared activity clock seeded to now, matching the
+// one TransportDataContextStats creates for its two copyHalf goroutines.
+func newLastActivity() *atomic.Int64 {
+	var a atomic.Int64
+	a.Store(time.Now().UnixNano())
+	return &a
+}
 
 // ---------------------------------------------------------------------------
 // Fakes & helpers
@@ -295,7 +305,7 @@ func TestCopyHalf_ReadError(t *testing.T) {
 	go io.Copy(io.Discard, dstOther)
 
 	src := &readErrConn{readErr: errors.New("read failure")}
-	n, err := copyHalf(context.Background(), dst, src)
+	n, err := copyHalf(context.Background(), dst, src, newLastActivity())
 	if err == nil || err.Error() != "read failure" {
 		t.Errorf("err = %v, want 'read failure'", err)
 	}
@@ -317,7 +327,7 @@ func TestCopyHalf_ContextCanceled(t *testing.T) {
 
 	go io.Copy(io.Discard, dstOther)
 
-	n, err := copyHalf(ctx, dst, src)
+	n, err := copyHalf(ctx, dst, src, newLastActivity())
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
@@ -341,7 +351,7 @@ func TestCopyHalf_WriteError(t *testing.T) {
 		srcOther.Close() // net.Pipe lacks CloseWrite; Close to unblock src.Read
 	}()
 
-	_, err := copyHalf(context.Background(), dst, src)
+	_, err := copyHalf(context.Background(), dst, src, newLastActivity())
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -363,7 +373,7 @@ func TestCopyHalf_ShortWrite(t *testing.T) {
 	}()
 	go io.Copy(io.Discard, dstOther)
 
-	_, err := copyHalf(context.Background(), sw, src)
+	_, err := copyHalf(context.Background(), sw, src, newLastActivity())
 	if err != io.ErrShortWrite {
 		t.Errorf("err = %v, want io.ErrShortWrite", err)
 	}
@@ -486,4 +496,139 @@ func TestHalfClose_OppositeDirectionDrainable(t *testing.T) {
 	if string(got) != "reverse" {
 		t.Errorf("got %q, want %q", got, "reverse")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Connection-level idle timeout (plan 1: shared activity clock)
+// ---------------------------------------------------------------------------
+
+// TestCopyHalf_IdleRenewedByPeer verifies that a silent half is kept alive as
+// long as the peer half keeps refreshing the shared activity clock, and only
+// times out once both directions go quiet. This is the regression test for the
+// "large download cut off after IdleTimeout" bug.
+func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
+	old := constant.IdleTimeout
+	constant.IdleTimeout = 100 * time.Millisecond
+	defer func() { constant.IdleTimeout = old }()
+
+	src, srcOther := tcpPair(t)
+	defer src.Close()
+	defer srcOther.Close()
+	dst, dstOther := tcpPair(t)
+	defer dst.Close()
+	defer dstOther.Close()
+	go io.Copy(io.Discard, dstOther) // drain anything copyHalf writes
+
+	lastActivity := newLastActivity()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := copyHalf(ctx, dst, src, lastActivity)
+		done <- err
+	}()
+
+	// Simulate the peer direction making progress: refresh the shared clock
+	// far more often than IdleTimeout. copyHalf must survive several windows.
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				lastActivity.Store(time.Now().UnixNano())
+			}
+		}
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("copyHalf returned early with %v while peer was active", err)
+	case <-time.After(500 * time.Millisecond):
+		// survived 5x IdleTimeout without timing out: renewal works
+	}
+
+	close(stop)
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrIdleTimeout) {
+			t.Errorf("err = %v, want ErrIdleTimeout after peer stopped", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("copyHalf did not return after peer activity stopped")
+	}
+}
+
+// TestTransportData_IdleSurvivesAsymmetricFlow drives the full bidirectional
+// transport with a one-way stream (server->client) that outlasts IdleTimeout,
+// confirming the silent client->server half does not tear down the tunnel.
+func TestTransportData_IdleSurvivesAsymmetricFlow(t *testing.T) {
+	old := constant.IdleTimeout
+	constant.IdleTimeout = 100 * time.Millisecond
+	defer func() { constant.IdleTimeout = old }()
+
+	// client <-> proxy-side source ; server <-> proxy-side target
+	client, pSrc := tcpPair(t)
+	defer client.Close()
+	defer pSrc.Close()
+	server, pDst := tcpPair(t)
+	defer server.Close()
+	defer pDst.Close()
+
+	statsCh := make(chan TransportStats, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		st, err := TransportDataStats(pSrc, pDst)
+		statsCh <- st
+		errCh <- err
+	}()
+
+	// Server streams chunks well beyond IdleTimeout; client stays silent.
+	const chunks = 10
+	go func() {
+		for i := 0; i < chunks; i++ {
+			if _, err := server.Write([]byte{byte(i)}); err != nil {
+				return
+			}
+			time.Sleep(40 * time.Millisecond)
+		}
+		pipeCloseWrite(server)
+	}()
+
+	got := make([]byte, 0, chunks)
+	buf := make([]byte, 16)
+	for len(got) < chunks {
+		n, err := client.Read(buf)
+		if n > 0 {
+			got = append(got, buf[:n]...)
+		}
+		if err != nil {
+			t.Fatalf("client.Read after %d bytes: %v (download cut off)", len(got), err)
+		}
+	}
+	if len(got) != chunks {
+		t.Fatalf("received %d bytes, want %d", len(got), chunks)
+	}
+	for i, b := range got {
+		if b != byte(i) {
+			t.Fatalf("byte %d = %d, want %d", i, b, i)
+		}
+	}
+
+	// Tear down: close client so the silent half EOFs and transport returns.
+	pipeCloseWrite(client)
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("transport err = %v, want benign", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TransportDataStats did not return after client closed")
+	}
+	<-statsCh
 }

@@ -6,12 +6,17 @@ import (
 	"gocks/internal/constant"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
 // ErrNotSupported is returned by CloseWrite/CloseRead when the underlying
 // connection does not support half-closing.
 var ErrNotSupported = errors.New("tunnel: half-close not supported")
+
+// ErrIdleTimeout is returned when a tunnel is closed because neither direction
+// made progress for the whole IdleTimeout window.
+var ErrIdleTimeout = errors.New("tunnel: idle timeout")
 
 // TransportStats reports the bytes copied in each direction.
 type TransportStats struct {
@@ -40,6 +45,13 @@ func TransportDataContextStats(ctx context.Context, source, target net.Conn) (Tr
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// lastActivity is shared by both directions so the idle timer is measured
+	// across the whole tunnel: progress on either side keeps the other side
+	// alive. This matters for asymmetric flows like a large download, where the
+	// client->target half is naturally silent for the entire transfer.
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+
 	type result struct {
 		dir int // 0: source->target, 1: target->source
 		n   int64
@@ -47,11 +59,11 @@ func TransportDataContextStats(ctx context.Context, source, target net.Conn) (Tr
 	}
 	errCh := make(chan result, 2)
 	go func() {
-		n, err := copyHalf(ctx, target, source)
+		n, err := copyHalf(ctx, target, source, &lastActivity)
 		errCh <- result{0, n, err}
 	}()
 	go func() {
-		n, err := copyHalf(ctx, source, target)
+		n, err := copyHalf(ctx, source, target, &lastActivity)
 		errCh <- result{1, n, err}
 	}()
 
@@ -96,12 +108,16 @@ func isBenign(err error) bool {
 		errors.Is(err, io.EOF) ||
 		errors.Is(err, io.ErrClosedPipe) ||
 		errors.Is(err, net.ErrClosed) ||
-		errors.Is(err, context.Canceled)
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, ErrIdleTimeout)
 }
 
 // copyHalf copies src to dst until EOF or an error, then half-closes dst so
 // the peer observes the end of this direction. It returns the bytes written.
-func copyHalf(ctx context.Context, dst, src net.Conn) (int64, error) {
+// lastActivity is shared with the opposite direction: every successful read
+// refreshes it, and the read deadline is computed from it, so progress on the
+// peer side keeps this side alive even when it is itself idle.
+func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64) (int64, error) {
 	defer func() {
 		closeRead(src)
 		closeWrite(dst)
@@ -118,12 +134,18 @@ func copyHalf(ctx context.Context, dst, src net.Conn) (int64, error) {
 
 		if constant.IdleTimeout > 0 {
 			if rd, ok := src.(interface{ SetReadDeadline(time.Time) error }); ok {
-				_ = rd.SetReadDeadline(time.Now().Add(constant.IdleTimeout))
+				deadline := time.Unix(0, lastActivity.Load()).Add(constant.IdleTimeout)
+				now := time.Now()
+				if !deadline.After(now) {
+					return total, ErrIdleTimeout
+				}
+				_ = rd.SetReadDeadline(deadline)
 			}
 		}
 
 		nr, er := src.Read(buf)
 		if nr > 0 {
+			lastActivity.Store(time.Now().UnixNano())
 			nw, ew := dst.Write(buf[:nr])
 			total += int64(nw)
 			if ew != nil {
@@ -137,9 +159,29 @@ func copyHalf(ctx context.Context, dst, src net.Conn) (int64, error) {
 			if errors.Is(er, io.EOF) {
 				return total, nil
 			}
+			// A read-deadline expiry may just mean the peer refreshed the
+			// shared activity clock while we were blocked. Re-check and either
+			// renew our deadline or declare the whole tunnel idle.
+			if constant.IdleTimeout > 0 && isTimeoutErr(er) {
+				deadline := time.Unix(0, lastActivity.Load()).Add(constant.IdleTimeout)
+				if time.Now().Before(deadline) {
+					continue
+				}
+				return total, ErrIdleTimeout
+			}
 			return total, er
 		}
 	}
+}
+
+// isTimeoutErr reports whether err is a network timeout (e.g. an expired read
+// deadline) as opposed to a hard read failure.
+func isTimeoutErr(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return ne.Timeout()
+	}
+	return false
 }
 
 // closeWrite half-closes the write side of c. Connections that cannot be

@@ -1,3 +1,24 @@
+# 2026.10.12
+
+## 连接级共享活动时钟
+
+`internal/tunnel/tunnel.go`
+
+- TransportDataContextStats 新增 var lastActivity atomic.Int64，传给两个 copyHalf goroutine 共享。
+copyHalf 每次成功 Read 后 lastActivity.Store(now)（tunnel.go:148）；读截止时间改为基于 lastActivity.Load() + IdleTimeout（tunnel.go:137），而非各自 time.Now()。
+- 读截止到期时（tunnel.go:165）：若共享时钟已被对端刷新使 deadline 仍在未来，则 continue 续期重读；只有整条连接真正空闲满 IdleTimeout 才返回 ErrIdleTimeout。
+- 新增 ErrIdleTimeout 并纳入 isBenign，使空闲超时被视为正常关闭而非传输错误。
+- 新增 isTimeoutErr 用 errors.As(err, &net.Error) 判定超时类错误。
+
+`internal/constant/protocol.go`
+
+- IdleTimeout 由 const 改为 var（仅运行时引用，安全），并更新注释说明现在是连接级语义。
+
+`internal/tunnel/tunnel_test.go` 新增两个回归测试
+
+TestCopyHalf_IdleRenewedByPeer：白盒验证静默方向在对端刷新时钟时存活多个 IdleTimeout 窗口，对端停止后才返回 ErrIdleTimeout。
+TestTransportData_IdleSurvivesAsymmetricFlow：端到端验证单向下载流（持续 400ms，远超 100ms 测试用 IdleTimeout）不被切断，数据完整。
+
 # 2026.10.1
 
 代码精简重构，目标是消除「同一个决定写在多处」，每步后 `go build ./... && go vet ./... && go test ./...` 全绿。
