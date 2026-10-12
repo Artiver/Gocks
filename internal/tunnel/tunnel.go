@@ -24,6 +24,13 @@ type TransportStats struct {
 	TargetToSource int64
 }
 
+// Count bytes
+type result struct {
+	dir int
+	n   int64
+	err error
+}
+
 // TransportData proxies data bidirectionally between source and target until
 // both directions have finished.
 func TransportData(source, target net.Conn) error {
@@ -52,19 +59,14 @@ func TransportDataContextStats(ctx context.Context, source, target net.Conn) (Tr
 	var lastActivity atomic.Int64
 	lastActivity.Store(time.Now().UnixNano())
 
-	type result struct {
-		dir int // 0: source->target, 1: target->source
-		n   int64
-		err error
-	}
 	errCh := make(chan result, 2)
 	go func() {
 		n, err := copyHalf(ctx, target, source, &lastActivity)
-		errCh <- result{0, n, err}
+		errCh <- result{1, n, err}
 	}()
 	go func() {
 		n, err := copyHalf(ctx, source, target, &lastActivity)
-		errCh <- result{1, n, err}
+		errCh <- result{0, n, err}
 	}()
 
 	var stats TransportStats
