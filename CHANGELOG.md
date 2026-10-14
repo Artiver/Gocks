@@ -19,6 +19,8 @@ HTTP/1.0 客户端时 resp.TransferEncoding = nil：resp.Write 直接流式写�
 
 - 新增 countingWriter 类型（proxy.go:195）
 
+- 日志字节数单位转化（netutil.go:29）
+
 # 2026.10.12
 
 ## 连接级共享活动时钟

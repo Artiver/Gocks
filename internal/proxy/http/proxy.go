@@ -7,6 +7,7 @@ import (
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	"gocks/internal/dialer"
+	"gocks/internal/netutil"
 	"gocks/internal/server"
 	"gocks/internal/tunnel"
 	"io"
@@ -142,8 +143,8 @@ func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bo
 	// Replay anything the client sent after CONNECT before tunnelling.
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(upstream, tunnel.NewReaderConn(br, conn))
-	log.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
-		conn.RemoteAddr(), addr, time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	log.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%d sent, %d received)",
+		conn.RemoteAddr(), addr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
 		log.Println("[HTTP]", err)
 	}
@@ -184,8 +185,8 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 	shouldClose := finishResponse(req, resp)
 	respOut := &countingWriter{w: conn}
 	err = resp.Write(respOut)
-	log.Printf("[HTTP] [PROXY] %s <-> %s %s in %s (%d bytes sent, %d bytes received)",
-		conn.RemoteAddr(), addr, req.URL, time.Since(start).Round(time.Millisecond), reqOut.n, respOut.n)
+	log.Printf("[HTTP] [PROXY] %s <-> %s %s in %s (%d sent, %d received)",
+		conn.RemoteAddr(), addr, req.URL, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(reqOut.n), netutil.FormatBytes(respOut.n))
 	if err != nil {
 		return true, err
 	}

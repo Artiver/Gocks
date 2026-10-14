@@ -4,6 +4,7 @@ import (
 	"context"
 	"gocks/internal/config"
 	"gocks/internal/dialer"
+	"gocks/internal/netutil"
 	"gocks/internal/server"
 	"gocks/internal/tunnel"
 	"log"
@@ -37,8 +38,8 @@ func handleConnection(src net.Conn) {
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(src, dst)
-	log.Printf("[TCP] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
-		src.RemoteAddr(), dst.RemoteAddr(), time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	log.Printf("[TCP] %s <-> %s closed after %s (%d sent, %d received)",
+		src.RemoteAddr(), dst.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
 		log.Println("transport data error", err)
 	}

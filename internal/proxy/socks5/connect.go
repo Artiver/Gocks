@@ -3,6 +3,7 @@ package socks5
 import (
 	"errors"
 	"gocks/internal/dialer"
+	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
 	"log"
@@ -39,8 +40,8 @@ func handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(targetConn, conn)
-	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
-		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%d sent, %d received)",
+		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err
 }
 
