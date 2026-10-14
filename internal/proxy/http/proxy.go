@@ -129,7 +129,7 @@ func targetAddr(req *http.Request, defaultPort string) string {
 }
 
 func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
-	upstream, _, err := dialTarget(conn, req, ":443")
+	upstream, addr, err := dialTarget(conn, req, ":443")
 	if err != nil {
 		return true, err
 	}
@@ -140,14 +140,18 @@ func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bo
 	}
 
 	// Replay anything the client sent after CONNECT before tunnelling.
-	if err := tunnel.TransportData(upstream, tunnel.NewReaderConn(br, conn)); err != nil {
+	start := time.Now()
+	stats, err := tunnel.TransportDataStats(upstream, tunnel.NewReaderConn(br, conn))
+	log.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
+		conn.RemoteAddr(), addr, time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	if err != nil {
 		log.Println("[HTTP]", err)
 	}
 	return true, nil
 }
 
 func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
-	upstream, _, err := dialTarget(conn, req, ":80")
+	upstream, addr, err := dialTarget(conn, req, ":80")
 	if err != nil {
 		return true, err
 	}
@@ -163,7 +167,9 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 		req.RequestURI = req.URL.RequestURI()
 	}
 
-	if err := req.Write(upstream); err != nil {
+	start := time.Now()
+	reqOut := &countingWriter{w: upstream}
+	if err := req.Write(reqOut); err != nil {
 		return true, err
 	}
 
@@ -176,10 +182,26 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 	resp.Header.Add(constant.ViaHeader, constant.ViaValue)
 
 	shouldClose := finishResponse(req, resp)
-	if err := resp.Write(conn); err != nil {
+	respOut := &countingWriter{w: conn}
+	err = resp.Write(respOut)
+	log.Printf("[HTTP] [PROXY] %s <-> %s %s in %s (%d bytes sent, %d bytes received)",
+		conn.RemoteAddr(), addr, req.URL, time.Since(start).Round(time.Millisecond), reqOut.n, respOut.n)
+	if err != nil {
 		return true, err
 	}
 	return shouldClose, nil
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // finishResponse adjusts the upstream response for the client and reports

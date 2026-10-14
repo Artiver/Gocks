@@ -8,6 +8,7 @@ import (
 	"gocks/internal/tunnel"
 	"log"
 	"net"
+	"time"
 )
 
 // Run forwards TCP to the configured target until ctx is cancelled.
@@ -34,7 +35,11 @@ func handleConnection(src net.Conn) {
 
 	log.Printf("[TCP] %s <-> %s", src.RemoteAddr(), dst.RemoteAddr())
 
-	if err := tunnel.TransportData(src, dst); err != nil {
+	start := time.Now()
+	stats, err := tunnel.TransportDataStats(src, dst)
+	log.Printf("[TCP] %s <-> %s closed after %s (%d bytes sent, %d bytes received)",
+		src.RemoteAddr(), dst.RemoteAddr(), time.Since(start).Round(time.Millisecond), stats.SourceToTarget, stats.TargetToSource)
+	if err != nil {
 		log.Println("transport data error", err)
 	}
 }

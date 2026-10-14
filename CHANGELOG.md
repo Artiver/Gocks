@@ -11,6 +11,14 @@ finishResponse 中：响应无 Content-Length 且无 chunked 框架时，body �
 - HTTP/1.0 客户端丢弃 chunked proxy.go:193-195
 HTTP/1.0 客户端时 resp.TransferEncoding = nil：resp.Write 直接流式写出已解码 body（不缓冲整个 body 重编码），配合强制关闭界定 body；HTTP/1.1 客户端的 chunked 转发与 keep-alive 复用保持不变。
 
+## 代理字节数统计
+
+- handleConnectMethod（proxy.go:131）：改用 tunnel.TransportDataStats，隧道关闭后打印 [HTTP] [CONNECT] ... closed after ... (N bytes sent, N bytes received)，与 SOCKS5 日志格式一致
+
+- handleProxyMethod（proxy.go:149）：由于 http.Request.Write/http.Response.Write 只返回 error，新增 countingWriter 包装统计发往上游的请求字节数和发回客户端的响应字节数，请求完成后打印耗时和双向字节
+
+- 新增 countingWriter 类型（proxy.go:195）
+
 # 2026.10.12
 
 ## 连接级共享活动时钟

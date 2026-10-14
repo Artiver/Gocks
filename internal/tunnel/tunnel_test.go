@@ -230,40 +230,6 @@ func TestTransportDataStats_Empty(t *testing.T) {
 	}
 }
 
-func TestTransportData(t *testing.T) {
-	clientSide, source := tcpPair(t)
-	target, serverSide := tcpPair(t)
-	defer clientSide.Close()
-	defer serverSide.Close()
-
-	payload := []byte("test payload")
-
-	var received []byte
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		received, _ = io.ReadAll(serverSide)
-	}()
-
-	go func() {
-		clientSide.Write(payload)
-		pipeCloseWrite(clientSide)
-	}()
-	go func() {
-		pipeCloseWrite(serverSide)
-	}()
-
-	if err := TransportData(source, target); err != nil {
-		t.Fatalf("TransportData: %v", err)
-	}
-	wg.Wait()
-
-	if !bytes.Equal(received, payload) {
-		t.Errorf("received %q, want %q", received, payload)
-	}
-}
-
 // TestTransportDataContextStats_Cancel verifies that cancelling the context
 // mid-transfer makes the function return promptly instead of hanging. Uses
 // net.Pipe since cancel triggers forceClose regardless of half-close support.
