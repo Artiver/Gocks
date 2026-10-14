@@ -1,3 +1,16 @@
+# 2026.10.14
+
+## HTTP代理问题修复
+
+- IPv6 端口补全 proxy.go:99-113
+新增 targetAddr：用 net.SplitHostPort 判断是否带端口（取代 strings.Contains(addr, ":")），net.JoinHostPort 拼接——裸 IPv6 如 2001:db8::1 现在正确补为 [2001:db8::1]:443。
+
+- unknown-length 响应强制关闭 proxy.go:196-200
+finishResponse 中：响应无 Content-Length 且无 chunked 框架时，body 只能由连接关闭界定，强制 shouldClose = true，不再让 HTTP/1.1 客户端挂起等 10s 超时。
+
+- HTTP/1.0 客户端丢弃 chunked proxy.go:193-195
+HTTP/1.0 客户端时 resp.TransferEncoding = nil：resp.Write 直接流式写出已解码 body（不缓冲整个 body 重编码），配合强制关闭界定 body；HTTP/1.1 客户端的 chunked 转发与 keep-alive 复用保持不变。
+
 # 2026.10.12
 
 ## 连接级共享活动时钟

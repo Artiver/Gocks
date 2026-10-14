@@ -98,13 +98,7 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 // dialTarget resolves the target of req, defaulting to defaultPort when the
 // request carries no port, and connects to it. It answers 502 on failure.
 func dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn, string, error) {
-	addr := req.Host
-	if addr == "" && req.URL != nil {
-		addr = req.URL.Host
-	}
-	if !strings.Contains(addr, ":") {
-		addr += defaultPort
-	}
+	addr := targetAddr(req, strings.TrimPrefix(defaultPort, ":"))
 
 	upstream, err := dialer.DialTcpConnection(addr)
 	if err != nil {
@@ -117,6 +111,21 @@ func dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn,
 
 	log.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
 	return upstream, addr, nil
+}
+
+// targetAddr resolves the host:port to dial for req, defaulting to defaultPort
+// when the request carries no port. SplitHostPort is the reliable "carries a
+// port" check: a bare IPv6 literal contains ':' but no port, and JoinHostPort
+// brackets a bare IPv6 host correctly.
+func targetAddr(req *http.Request, defaultPort string) string {
+	addr := req.Host
+	if addr == "" && req.URL != nil {
+		addr = req.URL.Host
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		addr = net.JoinHostPort(strings.Trim(addr, "[]"), defaultPort)
+	}
+	return addr
 }
 
 func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
@@ -166,11 +175,33 @@ func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
 
 	resp.Header.Add(constant.ViaHeader, constant.ViaValue)
 
-	shouldClose := shouldCloseConnection(req, resp)
+	shouldClose := finishResponse(req, resp)
 	if err := resp.Write(conn); err != nil {
 		return true, err
 	}
 	return shouldClose, nil
+}
+
+// finishResponse adjusts the upstream response for the client and reports
+// whether the client connection must be closed afterwards.
+//
+// Chunked is an HTTP/1.1 transfer coding; rather than buffering the whole
+// body to re-encode it, the framing is dropped for an HTTP/1.0 client and
+// Response.Write streams the decoded body raw instead.
+//
+// A body whose length cannot be known up front (no Content-Length, no chunked
+// framing) is delimited only by the end of the connection. The client must see
+// the connection close or it waits for more bytes forever, so keep-alive
+// cannot continue.
+func finishResponse(req *http.Request, resp *http.Response) bool {
+	if req.ProtoMajor == 1 && req.ProtoMinor == 0 {
+		resp.TransferEncoding = nil
+	}
+	shouldClose := shouldCloseConnection(req, resp)
+	if resp.ContentLength < 0 && len(resp.TransferEncoding) == 0 {
+		shouldClose = true
+	}
+	return shouldClose
 }
 
 func shouldCloseConnection(req *http.Request, resp *http.Response) bool {
