@@ -87,7 +87,7 @@ func handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(targetConn, tunnel.NewReaderConn(br, conn))
-	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%d sent, %d received)",
+	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%s sent, %s received)",
 		clientAddr, targetConn.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err
 }

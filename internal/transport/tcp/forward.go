@@ -38,7 +38,7 @@ func handleConnection(src net.Conn) {
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(src, dst)
-	log.Printf("[TCP] %s <-> %s closed after %s (%d sent, %d received)",
+	log.Printf("[TCP] %s <-> %s closed after %s (%s sent, %s received)",
 		src.RemoteAddr(), dst.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
 		log.Println("transport data error", err)
