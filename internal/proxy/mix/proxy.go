@@ -15,7 +15,7 @@ import (
 
 // Run serves the HTTP+SOCKS5 mixed proxy until ctx is cancelled.
 func Run(ctx context.Context) error {
-	return server.Serve(ctx, "MIX proxy", config.ProxyConfig.BindAddr, chooseProxy)
+	return server.Serve(ctx, "HTTP+SOCKS5 proxy", config.ProxyConfig.BindAddr, chooseProxy)
 }
 
 // chooseProxy peeks at the first byte to tell the two protocols apart: a SOCKS5
