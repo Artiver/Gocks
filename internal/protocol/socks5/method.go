@@ -1,6 +1,9 @@
 package socks5
 
-import "io"
+import (
+	"io"
+	"slices"
+)
 
 // ReadMethods reads the method selection message:
 //
@@ -44,10 +47,5 @@ func WriteMethod(method byte, w io.Writer) error {
 
 // HasMethod reports whether methods contains m.
 func HasMethod(methods []byte, m byte) bool {
-	for _, method := range methods {
-		if method == m {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(methods, m)
 }

@@ -1,7 +1,9 @@
 package socks5
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"strconv"
@@ -98,38 +100,15 @@ func (addr *Addr) Decode(b []byte) (int, error) {
 		return 0, io.ErrUnexpectedEOF
 	}
 	addr.Type = b[0]
-	n := 1
 
-	switch addr.Type {
-	case AddrIPv4:
-		if len(b) < n+net.IPv4len+2 {
-			return 0, io.ErrUnexpectedEOF
+	n, err := addr.readBody(bytes.NewReader(b[1:]))
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
 		}
-		addr.Host = net.IP(b[n : n+net.IPv4len]).String()
-		n += net.IPv4len
-	case AddrIPv6:
-		if len(b) < n+net.IPv6len+2 {
-			return 0, io.ErrUnexpectedEOF
-		}
-		addr.Host = net.IP(b[n : n+net.IPv6len]).String()
-		n += net.IPv6len
-	case AddrDomain:
-		if len(b) < n+1 {
-			return 0, io.ErrUnexpectedEOF
-		}
-		addrlen := int(b[n])
-		n++
-		if len(b) < n+addrlen+2 {
-			return 0, io.ErrUnexpectedEOF
-		}
-		addr.Host = string(b[n : n+addrlen])
-		n += addrlen
-	default:
-		return 0, ErrBadAddrType
+		return 0, err
 	}
-
-	addr.Port = binary.BigEndian.Uint16(b[n:])
-	return n + 2, nil
+	return 1 + int(n), nil
 }
 
 // Encode writes the wire representation into b and returns its length. b must

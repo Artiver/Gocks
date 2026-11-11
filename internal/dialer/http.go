@@ -1,4 +1,4 @@
-package forward
+package dialer
 
 import (
 	"bufio"

@@ -1,4 +1,4 @@
-package forward
+package dialer
 
 import (
 	"errors"
@@ -16,12 +16,12 @@ import (
 // chain must not be empty.
 func DialThroughChain(chain []config.Url, address string) (net.Conn, error) {
 	if len(chain) == 0 {
-		return nil, errors.New("forward: empty proxy chain")
+		return nil, errors.New("dialer: empty proxy chain")
 	}
 
 	conn, err := net.DialTimeout("tcp", chain[0].BindAddr, constant.TcpConnectTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("forward: hop[0] %s: %w", chain[0].BindAddr, err)
+		return nil, fmt.Errorf("dialer: hop[0] %s: %w", chain[0].BindAddr, err)
 	}
 
 	for i, hop := range chain {
@@ -32,7 +32,7 @@ func DialThroughChain(chain []config.Url, address string) (net.Conn, error) {
 		}
 		if err := dialHop(conn, hop, target); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("forward: hop[%d] %s: %w", i, hop.BindAddr, err)
+			return nil, fmt.Errorf("dialer: hop[%d] %s: %w", i, hop.BindAddr, err)
 		}
 	}
 	return conn, nil
@@ -47,6 +47,6 @@ func dialHop(conn net.Conn, hop config.Url, address string) error {
 	case constant.HTTP:
 		return dialHTTPHop(conn, hop, address)
 	default:
-		return fmt.Errorf("forward: unsupported scheme %q", hop.Scheme)
+		return fmt.Errorf("dialer: unsupported scheme %q", hop.Scheme)
 	}
 }

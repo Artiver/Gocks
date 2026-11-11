@@ -21,11 +21,10 @@ Gocks/
 ├── internal/
 │   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
 │   ├── constant/                  # 协议/超时常量（protocol.go）
-│   ├── dialer/                    # 统一拨号入口（TCP/UDP 上游）
-│   ├── forward/                   # 上游代理拨号（forward.go 链式调度, http.go, socks5.go）
+│   ├── dialer/                    # 统一拨号入口（直连 + 链式上游，chain.go/http.go/socks5.go）
 │   ├── netutil/                   # 网络小工具（可取消的 Sleep）
-│   ├── protocol/socks5/           # SOCKS5 编解码与服务端握手
-│   │                              #   codec/method/auth/addr/request/reply/udp/server
+│   ├── protocol/socks5/           # SOCKS5 编解码与客户端/服务端握手
+│   │                              #   codec/method/auth/addr/request/reply/udp/server/client
 │   ├── proxy/                     # 代理协议
 │   │   ├── http/                  #   HTTP 代理
 │   │   ├── mix/                   #   混合代理

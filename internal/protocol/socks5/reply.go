@@ -41,17 +41,5 @@ func ReadReply(r io.Reader) (*Reply, error) {
 
 // Write encodes the reply. A nil address is encoded as 0.0.0.0:0.
 func (rep *Reply) Write(w io.Writer) error {
-	addr := rep.Addr
-	if addr == nil {
-		addr = &Addr{Type: AddrIPv4}
-	}
-	buf := make([]byte, 3+addr.Length())
-	buf[0] = Version
-	buf[1] = rep.Rep
-	buf[2] = 0x00
-	if _, err := addr.Encode(buf[3:]); err != nil {
-		return err
-	}
-	_, err := w.Write(buf)
-	return err
+	return writeMessage(w, rep.Rep, rep.Addr)
 }

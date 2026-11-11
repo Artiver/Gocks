@@ -45,17 +45,5 @@ func ReadRequest(r io.Reader) (*Request, error) {
 
 // Write encodes the request.
 func (req *Request) Write(w io.Writer) error {
-	addr := req.Addr
-	if addr == nil {
-		addr = &Addr{Type: AddrIPv4}
-	}
-	buf := make([]byte, 3+addr.Length())
-	buf[0] = Version
-	buf[1] = req.Cmd
-	buf[2] = 0x00
-	if _, err := addr.Encode(buf[3:]); err != nil {
-		return err
-	}
-	_, err := w.Write(buf)
-	return err
+	return writeMessage(w, req.Cmd, req.Addr)
 }

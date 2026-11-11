@@ -6,7 +6,10 @@
 // prefixed reader without losing bytes that follow the message.
 package socks5
 
-import "errors"
+import (
+	"errors"
+	"io"
+)
 
 // Protocol versions.
 const (
@@ -91,4 +94,21 @@ func ReprString(rep byte) string {
 	default:
 		return "unknown"
 	}
+}
+
+// writeMessage encodes the common request/reply frame: VER, a command or reply
+// code, RSV, then the address. A nil address is encoded as 0.0.0.0:0.
+func writeMessage(w io.Writer, second byte, addr *Addr) error {
+	if addr == nil {
+		addr = &Addr{Type: AddrIPv4}
+	}
+	buf := make([]byte, 3+addr.Length())
+	buf[0] = Version
+	buf[1] = second
+	buf[2] = 0x00
+	if _, err := addr.Encode(buf[3:]); err != nil {
+		return err
+	}
+	_, err := w.Write(buf)
+	return err
 }

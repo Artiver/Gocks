@@ -4,7 +4,6 @@ import (
 	"errors"
 	"gocks/internal/config"
 	"gocks/internal/constant"
-	"gocks/internal/forward"
 	socks5proto "gocks/internal/protocol/socks5"
 	"net"
 )
@@ -15,7 +14,7 @@ func DialTcpConnection(address string) (net.Conn, error) {
 	if len(config.ForwardChain) == 0 {
 		return net.DialTimeout("tcp", address, constant.TcpConnectTimeout)
 	}
-	return forward.DialThroughChain(config.ForwardChain, address)
+	return DialThroughChain(config.ForwardChain, address)
 }
 
 // DialUdpAssociation opens a UDP association through the configured upstream
@@ -35,7 +34,7 @@ func DialUdpAssociation() (net.Conn, *socks5proto.Addr, error) {
 		if hop.Scheme != constant.Socks5 {
 			return nil, nil, errors.New("udp over this forward scheme is not supported")
 		}
-		return forward.DialSocks5UDPAssociate(hop)
+		return DialSocks5UDPAssociate(hop)
 
 	default:
 		return nil, nil, errors.New("udp associate through a forward chain of more than one hop is not supported")
