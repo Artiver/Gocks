@@ -33,6 +33,8 @@ func TestHostWithPort(t *testing.T) {
 		{"bracketed ipv6 no port", "[::1]", "[::1]:80", false, ""},
 		{"hostname no port", "example.com", "example.com:80", false, ""},
 		{"invalid multi colon", "host:bad:port", "", true, "invalid address"},
+		{"port out of range", "example.com:70000", "", true, "out of range"},
+		{"negative port", "example.com:-1", "", true, "out of range"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,7 +61,7 @@ func TestHostWithPort(t *testing.T) {
 // TestParseUrl covers all schemes (socks5, http, tcp, udp), with and without
 // auth, with and without explicit port, IPv4/IPv6 hosts, the /target path form,
 // trailing slash, empty-user-with-password, special characters in password, and
-// every error path (invalid URL, oversized credentials, invalid escape).
+// every error path (invalid URL, oversized credentials).
 func TestParseUrl(t *testing.T) {
 	longUser := strings.Repeat("a", 256)
 	longPass := strings.Repeat("p", 256)
@@ -94,11 +96,14 @@ func TestParseUrl(t *testing.T) {
 		{"empty user with password", "socks5://:pass@host:1080", "socks5", "host:1080", "", "", "", false, false, ""},
 		// special characters in password (URL-encoded %40 -> @)
 		{"special chars in password", "socks5://user:p%40ss@host:1080", "socks5", "host:1080", "", "user", "p@ss", true, false, ""},
+		// percent sign is decoded exactly once, by url.Parse
+		{"percent sign in password", "socks5://user:p%25zz@host:1080", "socks5", "host:1080", "", "user", "p%zz", true, false, ""},
+		// plus sign is not a query separator inside userinfo
+		{"plus sign in password", "socks5://user:p+q@host:1080", "socks5", "host:1080", "", "user", "p+q", true, false, ""},
 		// error paths
 		{"invalid url", "http://[::1", "", "", "", "", "", false, true, "missing"},
 		{"username too long", "socks5://" + longUser + "@host:1080", "", "", "", "", "", false, true, "255 bytes"},
 		{"password too long", "socks5://user:" + longPass + "@host:1080", "", "", "", "", "", false, true, "255 bytes"},
-		{"invalid escape in password", "socks5://user:p%25zz@host:1080", "", "", "", "", "", false, true, "invalid"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

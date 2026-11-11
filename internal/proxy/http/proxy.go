@@ -83,8 +83,8 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 		return true, err
 	}
 
-	if auth := config.ProxyConfig.Auth; auth != nil && !checkProxyAuthorizationFromHeader(auth, req.Header) {
-		if _, err := conn.Write(config.AuthRequiredResponse); err != nil {
+	if auth := config.ProxyConfig.Auth; auth != nil && !checkAuthHeader(auth, req.Header.Get(constant.BasicAuthHeader)) {
+		if _, err := io.WriteString(conn, authRequiredResponse); err != nil {
 			log.Println("send 407 error:", err)
 		}
 		return true, nil
@@ -104,7 +104,7 @@ func dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn,
 	upstream, err := dialer.DialTcpConnection(addr)
 	if err != nil {
 		log.Println(err)
-		if _, werr := conn.Write(config.BadGatewayResponse); werr != nil {
+		if _, werr := io.WriteString(conn, badGatewayResponse); werr != nil {
 			log.Println("send 502 error:", werr)
 		}
 		return nil, addr, err
@@ -136,7 +136,7 @@ func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bo
 	}
 	defer upstream.Close()
 
-	if _, err := conn.Write(config.ConnectedResponse); err != nil {
+	if _, err := io.WriteString(conn, connectedResponse); err != nil {
 		return true, err
 	}
 

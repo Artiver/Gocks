@@ -12,12 +12,10 @@ const Socks5 = "socks5"
 
 const ConnectMethod = "CONNECT"
 
-// DefaultReadBytes is the prefix the mixed-mode dispatcher reads to tell HTTP
-// and SOCKS5 apart.
-const DefaultReadBytes = 512
-
 const TcpConnectTimeout = 5 * time.Second
-const UdpReceiveTimeout = 3 * time.Second
+
+// UDPBufferSize is large enough for any UDP payload plus the SOCKS5 header.
+const UDPBufferSize = 65535
 
 // HandshakeTimeout bounds every protocol negotiation step, including the wait
 // for a client's opening message.

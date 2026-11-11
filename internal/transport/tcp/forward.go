@@ -29,7 +29,7 @@ func handleConnection(src net.Conn) {
 	// so -F applies to port forwarding as well.
 	dst, err := dialer.DialTcpConnection(config.ProxyConfig.TranAddr)
 	if err != nil {
-		log.Println("dial tcp error which", config.ProxyConfig.TranAddr)
+		log.Printf("dial tcp %s: %v", config.ProxyConfig.TranAddr, err)
 		return
 	}
 	defer dst.Close()

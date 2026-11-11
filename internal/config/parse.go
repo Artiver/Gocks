@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -31,9 +32,7 @@ func ParseUrl(str string, arg *Url) error {
 
 	username := u.User.Username()
 	password, _ := u.User.Password()
-	if password, err = url.QueryUnescape(password); err != nil {
-		return err
-	}
+
 	if username == "" {
 		return nil
 	}
@@ -51,7 +50,10 @@ func hostWithPort(host string) (string, error) {
 	if host == "" {
 		return "", nil
 	}
-	if _, _, err := net.SplitHostPort(host); err == nil {
+	if _, port, err := net.SplitHostPort(host); err == nil {
+		if err := validatePort(port); err != nil {
+			return "", err
+		}
 		return host, nil
 	}
 
@@ -62,4 +64,17 @@ func hostWithPort(host string) (string, error) {
 		return host + ":" + defaultPort, nil
 	}
 	return "", fmt.Errorf("invalid address %q", host)
+}
+
+// validatePort rejects numeric ports outside the 16-bit range. Service names
+// are left to net.Dial to resolve.
+func validatePort(port string) error {
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return nil
+	}
+	if n < 0 || n > 65535 {
+		return fmt.Errorf("port out of range: %d", n)
+	}
+	return nil
 }

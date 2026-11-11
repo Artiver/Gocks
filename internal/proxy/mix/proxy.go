@@ -4,6 +4,7 @@ import (
 	"context"
 	"gocks/internal/config"
 	"gocks/internal/constant"
+
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/proxy/http"
 	"gocks/internal/proxy/socks5"
@@ -12,6 +13,10 @@ import (
 	"net"
 	"time"
 )
+
+// defaultReadBytes is the prefix the mixed-mode dispatcher reads to tell HTTP
+// and SOCKS5 apart.
+const defaultReadBytes = 512
 
 // Run serves the HTTP+SOCKS5 mixed proxy until ctx is cancelled.
 func Run(ctx context.Context) error {
@@ -23,7 +28,7 @@ func Run(ctx context.Context) error {
 // The pre-read bytes are handed to the chosen handler so its parser sees the
 // complete opening message.
 func chooseProxy(conn net.Conn) {
-	buff := make([]byte, constant.DefaultReadBytes)
+	buff := make([]byte, defaultReadBytes)
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		log.Printf("set read deadline error: %v", err)
 		conn.Close()

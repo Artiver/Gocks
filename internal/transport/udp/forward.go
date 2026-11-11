@@ -11,9 +11,8 @@ import (
 	"time"
 )
 
-// maxDatagramSize is the largest datagram that can be relayed: 65535 is the
-// maximum UDP payload, so nothing is truncated.
-const maxDatagramSize = 65535
+// udpReceiveTimeout bounds how long to wait for the upstream reply.
+const udpReceiveTimeout = 3 * time.Second
 
 // Run forwards UDP to the configured target until ctx is cancelled.
 func Run(ctx context.Context) error {
@@ -30,7 +29,7 @@ func Run(ctx context.Context) error {
 
 	log.Println("UDP port listening", config.ProxyConfig.BindAddr)
 
-	buffer := make([]byte, maxDatagramSize)
+	buffer := make([]byte, constant.UDPBufferSize)
 	for {
 		size, clientAddr, err := listen.ReadFrom(buffer)
 		if err != nil {
@@ -70,11 +69,11 @@ func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn) {
 		return
 	}
 
-	if err := forwardConn.SetReadDeadline(time.Now().Add(constant.UdpReceiveTimeout)); err != nil {
+	if err := forwardConn.SetReadDeadline(time.Now().Add(udpReceiveTimeout)); err != nil {
 		return
 	}
 
-	responseBuffer := make([]byte, maxDatagramSize)
+	responseBuffer := make([]byte, constant.UDPBufferSize)
 	n, err := forwardConn.Read(responseBuffer)
 	if err != nil {
 		var netErr net.Error

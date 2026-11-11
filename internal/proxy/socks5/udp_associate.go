@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// udpBufferSize is large enough for any UDP payload plus the SOCKS5 header.
-const udpBufferSize = 65535
-
 // handleUDPAssociate implements RFC 1928 §7: it binds a client-facing UDP
 // socket and relays datagrams between the client and one upstream socket per
 // target, until the TCP control connection closes or the relay goes idle.
@@ -54,12 +51,8 @@ func handleUDPAssociate(conn net.Conn) error {
 	}
 
 	bound := clientConn.LocalAddr().(*net.UDPAddr)
-	replyHost := bindIP.String()
-	if bindIP.IsUnspecified() && ok && tcpLocal.IP != nil {
-		replyHost = tcpLocal.IP.String()
-	}
 	if err := writeReply(conn, socks5proto.RepSucceeded, &socks5proto.Addr{
-		Host: replyHost,
+		Host: bindIP.String(),
 		Port: uint16(bound.Port),
 	}); err != nil {
 		return err
@@ -145,7 +138,7 @@ func (r *udpRelay) run(ctx context.Context) {
 func (r *udpRelay) runDirect(ctx context.Context) {
 	defer r.closeAll()
 
-	buf := make([]byte, udpBufferSize)
+	buf := make([]byte, constant.UDPBufferSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,7 +181,7 @@ func (r *udpRelay) runUpstream(ctx context.Context) {
 
 	// upstream -> client
 	go func() {
-		ubuf := make([]byte, udpBufferSize)
+		ubuf := make([]byte, constant.UDPBufferSize)
 		for {
 			if err := r.upstreamConn.SetReadDeadline(time.Now().Add(constant.UDPIdleTimeout)); err != nil {
 				return
@@ -210,7 +203,7 @@ func (r *udpRelay) runUpstream(ctx context.Context) {
 	}()
 
 	// client -> upstream
-	buf := make([]byte, udpBufferSize)
+	buf := make([]byte, constant.UDPBufferSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -303,7 +296,7 @@ func (r *udpRelay) pump(key string, s *udpSession, target *net.UDPAddr) {
 	// Report the resolved upstream address, never a domain, so clients that
 	// cannot parse ATYP=Domain (RFC 1928 §7) still work.
 	srcAddr := &socks5proto.Addr{Host: target.IP.String(), Port: uint16(target.Port)}
-	buf := make([]byte, udpBufferSize)
+	buf := make([]byte, constant.UDPBufferSize)
 	for {
 		if err := s.conn.SetReadDeadline(time.Now().Add(constant.UDPIdleTimeout)); err != nil {
 			return

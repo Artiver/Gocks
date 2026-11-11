@@ -6,13 +6,8 @@ import (
 	"gocks/internal/config"
 	"gocks/internal/constant"
 	"log"
-	"net/http"
 	"strings"
 )
-
-func checkProxyAuthorizationFromHeader(auth *config.Auth, header http.Header) bool {
-	return checkAuthHeader(auth, header.Get(constant.BasicAuthHeader))
-}
 
 // checkAuthHeader verifies one Proxy-Authorization header value against auth.
 // Both fields are compared in constant time so the response cannot be used as

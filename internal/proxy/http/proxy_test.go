@@ -2,6 +2,8 @@ package http
 
 import (
 	"bufio"
+	"gocks/internal/config"
+	"gocks/internal/constant"
 	"io"
 	"net"
 	"net/http"
@@ -261,5 +263,65 @@ func TestHandleProxyKeepAliveChunked(t *testing.T) {
 		if string(body) != "hello" {
 			t.Errorf("body #%d = %q, want %q", i, body, "hello")
 		}
+	}
+}
+
+// TestProxyAuthRequired verifies that a request without credentials is
+// answered with the 407 response defined by the proxy package.
+func TestProxyAuthRequired(t *testing.T) {
+	old := config.ProxyConfig
+	config.ProxyConfig = config.Url{Auth: &config.Auth{Username: "user", Password: "pass"}}
+	t.Cleanup(func() { config.ProxyConfig = old })
+
+	proxyAddr := proxyListener(t)
+	client := proxyClient(t, proxyAddr)
+
+	resp, err := client.Get("http://example.com/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
+	}
+	if got := resp.Header.Get("Proxy-Authenticate"); got == "" {
+		t.Error("Proxy-Authenticate header is missing")
+	}
+}
+
+// TestProxyAuthAccepted verifies that valid credentials pass through to the
+// upstream and that the regular request path still works.
+func TestProxyAuthAccepted(t *testing.T) {
+	auth := &config.Auth{Username: "user", Password: "pass"}
+	old := config.ProxyConfig
+	config.ProxyConfig = config.Url{Auth: auth}
+	t.Cleanup(func() { config.ProxyConfig = old })
+
+	upstream := rawUpstream(t, []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"), false)
+	proxyAddr := proxyListener(t)
+	client := proxyClient(t, proxyAddr)
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+upstream+"/data", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set(constant.BasicAuthHeader, auth.ProxyAuthorization())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if string(body) != "ok" {
+		t.Errorf("body = %q, want %q", body, "ok")
 	}
 }
