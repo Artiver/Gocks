@@ -190,20 +190,21 @@ func rawUpstream(t *testing.T, resp []byte, halfClose bool) string {
 
 // proxyListener starts an HTTP proxy on a loopback port and returns its
 // address.
-func proxyListener(t *testing.T) string {
+func proxyListener(t *testing.T, cfg config.Config) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
 	t.Cleanup(func() { ln.Close() })
+	p := New(cfg)
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			go HandleHTTPConnection(c, nil)
+			go p.HandleConnection(c, nil)
 		}
 	}()
 	return ln.Addr().String()
@@ -225,7 +226,7 @@ func proxyClient(t *testing.T, proxyAddr string) *http.Client {
 // on a kept-alive connection.
 func TestHandleProxyUnknownLengthResponse(t *testing.T) {
 	upstream := rawUpstream(t, []byte("HTTP/1.0 200 OK\r\n\r\nhello world"), true)
-	proxyAddr := proxyListener(t)
+	proxyAddr := proxyListener(t, config.Config{})
 
 	client := proxyClient(t, proxyAddr)
 	resp, err := client.Get("http://" + upstream + "/data")
@@ -247,7 +248,7 @@ func TestHandleProxyUnknownLengthResponse(t *testing.T) {
 // succeeds without the proxy closing the connection in between.
 func TestHandleProxyKeepAliveChunked(t *testing.T) {
 	upstream := rawUpstream(t, []byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"), false)
-	proxyAddr := proxyListener(t)
+	proxyAddr := proxyListener(t, config.Config{})
 
 	client := proxyClient(t, proxyAddr)
 	for i := 0; i < 2; i++ {
@@ -269,11 +270,10 @@ func TestHandleProxyKeepAliveChunked(t *testing.T) {
 // TestProxyAuthRequired verifies that a request without credentials is
 // answered with the 407 response defined by the proxy package.
 func TestProxyAuthRequired(t *testing.T) {
-	old := config.ProxyConfig
-	config.ProxyConfig = config.Url{Auth: &config.Auth{Username: "user", Password: "pass"}}
-	t.Cleanup(func() { config.ProxyConfig = old })
-
-	proxyAddr := proxyListener(t)
+	cfg := config.Config{Listen: config.Endpoint{
+		Auth: &config.Auth{Username: "user", Password: "pass"},
+	}}
+	proxyAddr := proxyListener(t, cfg)
 	client := proxyClient(t, proxyAddr)
 
 	resp, err := client.Get("http://example.com/")
@@ -294,12 +294,10 @@ func TestProxyAuthRequired(t *testing.T) {
 // upstream and that the regular request path still works.
 func TestProxyAuthAccepted(t *testing.T) {
 	auth := &config.Auth{Username: "user", Password: "pass"}
-	old := config.ProxyConfig
-	config.ProxyConfig = config.Url{Auth: auth}
-	t.Cleanup(func() { config.ProxyConfig = old })
+	cfg := config.Config{Listen: config.Endpoint{Auth: auth}}
 
 	upstream := rawUpstream(t, []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"), false)
-	proxyAddr := proxyListener(t)
+	proxyAddr := proxyListener(t, cfg)
 	client := proxyClient(t, proxyAddr)
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+upstream+"/data", nil)

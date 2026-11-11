@@ -13,7 +13,7 @@ import (
 
 // dialHTTPHop sends a CONNECT request to the HTTP proxy hop over the already
 // established conn, using that hop's own credentials.
-func dialHTTPHop(conn net.Conn, hop config.Url, address string) error {
+func dialHTTPHop(conn net.Conn, hop config.Endpoint, address string) error {
 	if err := conn.SetDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}

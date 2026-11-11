@@ -14,25 +14,25 @@ import (
 // hop runs the same handshake as the classic single-upstream case.
 //
 // chain must not be empty.
-func DialThroughChain(chain []config.Url, address string) (net.Conn, error) {
+func DialThroughChain(chain []config.Endpoint, address string) (net.Conn, error) {
 	if len(chain) == 0 {
-		return nil, errors.New("dialer: empty proxy chain")
+		return nil, errors.New("dialer: empty upstream chain")
 	}
 
-	conn, err := net.DialTimeout("tcp", chain[0].BindAddr, constant.TcpConnectTimeout)
+	conn, err := net.DialTimeout("tcp", chain[0].Addr, constant.TcpConnectTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("dialer: hop[0] %s: %w", chain[0].BindAddr, err)
+		return nil, fmt.Errorf("dialer: hop[0] %s: %w", chain[0].Addr, err)
 	}
 
 	for i, hop := range chain {
 		target := address
 		if i < len(chain)-1 {
 			// Every hop but the last is asked to reach the next proxy.
-			target = chain[i+1].BindAddr
+			target = chain[i+1].Addr
 		}
 		if err := dialHop(conn, hop, target); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("dialer: hop[%d] %s: %w", i, hop.BindAddr, err)
+			return nil, fmt.Errorf("dialer: hop[%d] %s: %w", i, hop.Addr, err)
 		}
 	}
 	return conn, nil
@@ -40,7 +40,7 @@ func DialThroughChain(chain []config.Url, address string) (net.Conn, error) {
 
 // dialHop performs one hop's handshake over conn, asking the proxy to connect
 // to address.
-func dialHop(conn net.Conn, hop config.Url, address string) error {
+func dialHop(conn net.Conn, hop config.Endpoint, address string) error {
 	switch hop.Scheme {
 	case constant.Socks5:
 		return dialSocks5Hop(conn, hop, address)

@@ -2,7 +2,6 @@ package socks5
 
 import (
 	"context"
-	"gocks/internal/dialer"
 	socks5proto "gocks/internal/protocol/socks5"
 	"log"
 	"net"
@@ -11,7 +10,7 @@ import (
 // handleUDPAssociate implements RFC 1928 §7: it binds a client-facing UDP
 // socket and relays datagrams between the client and one upstream socket per
 // target, until the TCP control connection closes or the relay goes idle.
-func handleUDPAssociate(conn net.Conn) error {
+func (p *Proxy) handleUDPAssociate(conn net.Conn) error {
 	// Bind on the interface the client reached us on so that replies carry a
 	// source address the client will accept (RFC 1928 §6).
 	tcpLocal, ok := conn.LocalAddr().(*net.TCPAddr)
@@ -28,7 +27,7 @@ func handleUDPAssociate(conn net.Conn) error {
 
 	// Optionally chain the association through an upstream SOCKS5 proxy.
 	// This happens before the success reply so a failure is reported properly.
-	control, relayAddr, err := dialer.DialUdpAssociation()
+	control, relayAddr, err := p.dialer.DialUDPAssociation()
 	if err != nil {
 		return failReply(conn, err)
 	}

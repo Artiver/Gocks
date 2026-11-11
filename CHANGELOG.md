@@ -1,5 +1,13 @@
 # 2026.11.11
 
+## 内部结构：配置注入与命名规范化
+
+- 新增 `config.Config` 与 `config.Load(...) (Config, error)`，`main` 不再依赖全局 `ProxyConfig` / `ForwardChain`；`-L` / `-F` 解析失败由 `main` 统一 `log.Fatal`，不再在库函数内退出。
+- `config.Url` 更名为 `Endpoint`，字段 `BindAddr` / `TranAddr` 更名为 `Addr` / `Target`；`ForwardList` / `BuildForwardChain` / `MaxForwardHops` 更名为 `UpstreamList` / `buildUpstream` / `MaxUpstreamHops`。
+- `dialer` 改为 `dialer.New(upstream)` 实例，不再读取包级全局；各代理与端口转发入口统一为 `Run(ctx, cfg)`。
+- `tunnel.TransportDataStats` / `TransportDataContextStats` 增加超时参数，删除可变的 `constant.TunnelIdleTimeout`。
+- 命令行参数与运行时行为不变；外部可见错误信息中的 "forward hop" 改为 "upstream hop"。
+
 ## 可配置的通道空闲超时
 
 新增 `--timeout` 选项，默认 `0`，表示通道不因空闲自动关闭。

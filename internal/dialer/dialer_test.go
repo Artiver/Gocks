@@ -12,13 +12,6 @@ import (
 	"testing"
 )
 
-func withForwardChain(t *testing.T, chain []config.Url) {
-	t.Helper()
-	old := config.ForwardChain
-	config.ForwardChain = chain
-	t.Cleanup(func() { config.ForwardChain = old })
-}
-
 // fakeHTTPProxy accepts one connection and answers connects CONNECT requests
 // on it, reporting the target of each request.
 func fakeHTTPProxy(t *testing.T, connects int) (string, <-chan string) {
@@ -148,22 +141,22 @@ func acceptOnce(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-func TestDialTcpConnectionDirect(t *testing.T) {
-	withForwardChain(t, nil)
+func TestDialTCPDirect(t *testing.T) {
 	addr := acceptOnce(t)
+	d := New(nil)
 
-	conn, err := DialTcpConnection(addr)
+	conn, err := d.DialTCP(addr)
 	if err != nil {
-		t.Fatalf("DialTcpConnection: %v", err)
+		t.Fatalf("DialTCP: %v", err)
 	}
 	conn.Close()
 }
 
 func TestDialThroughChainHTTP(t *testing.T) {
 	proxyAddr, hosts := fakeHTTPProxy(t, 2)
-	chain := []config.Url{
-		{Scheme: constant.HTTP, BindAddr: proxyAddr},
-		{Scheme: constant.HTTP, BindAddr: "hop2.example:8080"},
+	chain := []config.Endpoint{
+		{Scheme: constant.HTTP, Addr: proxyAddr},
+		{Scheme: constant.HTTP, Addr: "hop2.example:8080"},
 	}
 
 	conn, err := DialThroughChain(chain, "target.example:443")
@@ -183,8 +176,8 @@ func TestDialThroughChainHTTP(t *testing.T) {
 func TestDialThroughChainSocks5(t *testing.T) {
 	proxyAddr, targets := fakeSocks5Proxy(t, nil, nil)
 
-	conn, err := DialThroughChain([]config.Url{
-		{Scheme: constant.Socks5, BindAddr: proxyAddr},
+	conn, err := DialThroughChain([]config.Endpoint{
+		{Scheme: constant.Socks5, Addr: proxyAddr},
 	}, "target.example:443")
 	if err != nil {
 		t.Fatalf("DialThroughChain: %v", err)
@@ -200,11 +193,11 @@ func TestDialThroughChainSocks5Auth(t *testing.T) {
 	cred := &socks5proto.Credential{Username: "user", Password: "pass"}
 	proxyAddr, targets := fakeSocks5Proxy(t, cred, nil)
 
-	conn, err := DialThroughChain([]config.Url{
+	conn, err := DialThroughChain([]config.Endpoint{
 		{
-			Scheme:   constant.Socks5,
-			BindAddr: proxyAddr,
-			Auth:     &config.Auth{Username: cred.Username, Password: cred.Password},
+			Scheme: constant.Socks5,
+			Addr:   proxyAddr,
+			Auth:   &config.Auth{Username: cred.Username, Password: cred.Password},
 		},
 	}, "target.example:443")
 	if err != nil {
@@ -225,32 +218,30 @@ func TestDialThroughChainEmpty(t *testing.T) {
 
 func TestDialThroughChainUnsupportedScheme(t *testing.T) {
 	addr := acceptOnce(t)
-	_, err := DialThroughChain([]config.Url{{Scheme: "ftp", BindAddr: addr}}, "target.example:443")
+	_, err := DialThroughChain([]config.Endpoint{{Scheme: "ftp", Addr: addr}}, "target.example:443")
 	if err == nil || !strings.Contains(err.Error(), "unsupported scheme") {
 		t.Fatalf("error = %v, want unsupported scheme", err)
 	}
 }
 
-func TestDialUdpAssociationNoChain(t *testing.T) {
-	withForwardChain(t, nil)
-
-	control, relay, err := DialUdpAssociation()
+func TestDialUDPAssociationNoChain(t *testing.T) {
+	control, relay, err := New(nil).DialUDPAssociation()
 	if err != nil {
-		t.Fatalf("DialUdpAssociation: %v", err)
+		t.Fatalf("DialUDPAssociation: %v", err)
 	}
 	if control != nil || relay != nil {
 		t.Fatalf("control = %v, relay = %v, want nil", control, relay)
 	}
 }
 
-func TestDialUdpAssociationSingleSocks5(t *testing.T) {
+func TestDialUDPAssociationSingleSocks5(t *testing.T) {
 	relay := &socks5proto.Addr{Type: socks5proto.AddrIPv4, Host: "127.0.0.1", Port: 1080}
 	proxyAddr, targets := fakeSocks5Proxy(t, nil, relay)
-	withForwardChain(t, []config.Url{{Scheme: constant.Socks5, BindAddr: proxyAddr}})
+	d := New([]config.Endpoint{{Scheme: constant.Socks5, Addr: proxyAddr}})
 
-	control, got, err := DialUdpAssociation()
+	control, got, err := d.DialUDPAssociation()
 	if err != nil {
-		t.Fatalf("DialUdpAssociation: %v", err)
+		t.Fatalf("DialUDPAssociation: %v", err)
 	}
 	defer control.Close()
 
@@ -262,22 +253,22 @@ func TestDialUdpAssociationSingleSocks5(t *testing.T) {
 	}
 }
 
-func TestDialUdpAssociationRejectsHTTP(t *testing.T) {
-	withForwardChain(t, []config.Url{{Scheme: constant.HTTP, BindAddr: "127.0.0.1:1"}})
+func TestDialUDPAssociationRejectsHTTP(t *testing.T) {
+	d := New([]config.Endpoint{{Scheme: constant.HTTP, Addr: "127.0.0.1:1"}})
 
-	_, _, err := DialUdpAssociation()
+	_, _, err := d.DialUDPAssociation()
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("error = %v, want unsupported", err)
 	}
 }
 
-func TestDialUdpAssociationRejectsMultiHop(t *testing.T) {
-	withForwardChain(t, []config.Url{
-		{Scheme: constant.Socks5, BindAddr: "127.0.0.1:1"},
-		{Scheme: constant.Socks5, BindAddr: "127.0.0.1:2"},
+func TestDialUDPAssociationRejectsMultiHop(t *testing.T) {
+	d := New([]config.Endpoint{
+		{Scheme: constant.Socks5, Addr: "127.0.0.1:1"},
+		{Scheme: constant.Socks5, Addr: "127.0.0.1:2"},
 	})
 
-	_, _, err := DialUdpAssociation()
+	_, _, err := d.DialUDPAssociation()
 	if err == nil || !strings.Contains(err.Error(), "more than one hop") {
 		t.Fatalf("error = %v, want multi-hop rejection", err)
 	}

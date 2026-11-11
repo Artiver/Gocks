@@ -2,7 +2,6 @@ package socks5
 
 import (
 	"errors"
-	"gocks/internal/dialer"
 	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
@@ -13,9 +12,9 @@ import (
 	"time"
 )
 
-func handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
+func (p *Proxy) handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 	targetAddr := addr.String()
-	targetConn, err := dialer.DialTcpConnection(targetAddr)
+	targetConn, err := p.dialer.DialTCP(targetAddr)
 
 	if err != nil {
 		if err1 := writeReply(conn, mapDialErrorToRep(err), nil); err1 != nil {
@@ -39,7 +38,7 @@ func handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 	}
 
 	start := time.Now()
-	stats, err := tunnel.TransportDataStats(targetConn, conn)
+	stats, err := tunnel.TransportDataStats(p.timeout, targetConn, conn)
 	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
 		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err

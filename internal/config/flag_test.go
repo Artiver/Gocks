@@ -1,17 +1,16 @@
 package config
 
 import (
-	"gocks/internal/constant"
 	"strings"
 	"testing"
 	"time"
 )
 
-// TestForwardListSet verifies that Set splits comma-separated values, trims
+// TestUpstreamListSet verifies that Set splits comma-separated values, trims
 // whitespace, ignores empty entries, and accumulates across repeated calls.
-func TestForwardListSet(t *testing.T) {
+func TestUpstreamListSet(t *testing.T) {
 	// single comma-separated string splits into multiple entries
-	var l ForwardList
+	var l UpstreamList
 	if err := l.Set("a,b,c"); err != nil {
 		t.Fatalf("Set err = %v", err)
 	}
@@ -34,7 +33,7 @@ func TestForwardListSet(t *testing.T) {
 	}
 
 	// empty entries ignored
-	var l2 ForwardList
+	var l2 UpstreamList
 	if err := l2.Set("a,,b"); err != nil {
 		t.Fatalf("Set err = %v", err)
 	}
@@ -46,7 +45,7 @@ func TestForwardListSet(t *testing.T) {
 	}
 
 	// whitespace trimmed
-	var l3 ForwardList
+	var l3 UpstreamList
 	if err := l3.Set("  x  ,  y  "); err != nil {
 		t.Fatalf("Set err = %v", err)
 	}
@@ -58,7 +57,7 @@ func TestForwardListSet(t *testing.T) {
 	}
 
 	// empty string -> no entries
-	var l4 ForwardList
+	var l4 UpstreamList
 	if err := l4.Set(""); err != nil {
 		t.Fatalf("Set err = %v", err)
 	}
@@ -67,7 +66,7 @@ func TestForwardListSet(t *testing.T) {
 	}
 
 	// only whitespace and commas -> no entries
-	var l5 ForwardList
+	var l5 UpstreamList
 	if err := l5.Set("  ,  ,  "); err != nil {
 		t.Fatalf("Set err = %v", err)
 	}
@@ -76,40 +75,40 @@ func TestForwardListSet(t *testing.T) {
 	}
 }
 
-// TestForwardListString verifies that String joins entries with commas and
+// TestUpstreamListString verifies that String joins entries with commas and
 // handles nil and empty receivers safely.
-func TestForwardListString(t *testing.T) {
+func TestUpstreamListString(t *testing.T) {
 	// nil receiver
-	var nilList *ForwardList
+	var nilList *UpstreamList
 	if got := nilList.String(); got != "" {
 		t.Errorf("nil String() = %q, want %q", got, "")
 	}
 
 	// empty list
-	var empty ForwardList
+	var empty UpstreamList
 	if got := empty.String(); got != "" {
 		t.Errorf("empty String() = %q, want %q", got, "")
 	}
 
 	// single entry
-	single := ForwardList{"only"}
+	single := UpstreamList{"only"}
 	if got := single.String(); got != "only" {
 		t.Errorf("String() = %q, want %q", got, "only")
 	}
 
 	// multiple entries
-	l := ForwardList{"a", "b", "c"}
+	l := UpstreamList{"a", "b", "c"}
 	if got := l.String(); got != "a,b,c" {
 		t.Errorf("String() = %q, want %q", got, "a,b,c")
 	}
 }
 
-// TestBuildForwardChain covers the empty chain, valid socks5/http hops, multiple
+// TestBuildUpstream covers the empty chain, valid socks5/http hops, multiple
 // hops, and every error path: unsupported scheme, too many hops, invalid URL,
 // and missing address.
-func TestBuildForwardChain(t *testing.T) {
+func TestBuildUpstream(t *testing.T) {
 	// empty input -> empty chain, no error
-	chain, err := BuildForwardChain(nil)
+	chain, err := buildUpstream(nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -118,7 +117,7 @@ func TestBuildForwardChain(t *testing.T) {
 	}
 
 	// single socks5 hop
-	chain, err = BuildForwardChain([]string{"socks5://host:1080"})
+	chain, err = buildUpstream([]string{"socks5://host:1080"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -128,12 +127,12 @@ func TestBuildForwardChain(t *testing.T) {
 	if chain[0].Scheme != "socks5" {
 		t.Errorf("Scheme = %q, want %q", chain[0].Scheme, "socks5")
 	}
-	if chain[0].BindAddr != "host:1080" {
-		t.Errorf("BindAddr = %q, want %q", chain[0].BindAddr, "host:1080")
+	if chain[0].Addr != "host:1080" {
+		t.Errorf("Addr = %q, want %q", chain[0].Addr, "host:1080")
 	}
 
 	// single http hop
-	chain, err = BuildForwardChain([]string{"http://host:8080"})
+	chain, err = buildUpstream([]string{"http://host:8080"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -142,7 +141,7 @@ func TestBuildForwardChain(t *testing.T) {
 	}
 
 	// multiple hops preserve order
-	chain, err = BuildForwardChain([]string{"socks5://a:1080", "http://b:8080"})
+	chain, err = buildUpstream([]string{"socks5://a:1080", "http://b:8080"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -153,8 +152,8 @@ func TestBuildForwardChain(t *testing.T) {
 		t.Errorf("schemes = %q %q, want socks5 http", chain[0].Scheme, chain[1].Scheme)
 	}
 
-	// unsupported scheme (tcp is not allowed in forward chain)
-	_, err = BuildForwardChain([]string{"tcp://host:1234"})
+	// unsupported scheme (tcp is not allowed in the upstream chain)
+	_, err = buildUpstream([]string{"tcp://host:1234"})
 	if err == nil {
 		t.Fatal("expected error for unsupported scheme")
 	}
@@ -163,11 +162,11 @@ func TestBuildForwardChain(t *testing.T) {
 	}
 
 	// too many hops
-	addrs := make([]string, MaxForwardHops+1)
+	addrs := make([]string, MaxUpstreamHops+1)
 	for i := range addrs {
 		addrs[i] = "socks5://host:1080"
 	}
-	_, err = BuildForwardChain(addrs)
+	_, err = buildUpstream(addrs)
 	if err == nil {
 		t.Fatal("expected error for too many hops")
 	}
@@ -176,16 +175,16 @@ func TestBuildForwardChain(t *testing.T) {
 	}
 
 	// invalid URL in a hop
-	_, err = BuildForwardChain([]string{"http://[::1"})
+	_, err = buildUpstream([]string{"http://[::1"})
 	if err == nil {
 		t.Fatal("expected error for invalid url")
 	}
-	if !strings.Contains(err.Error(), "forward hop") {
-		t.Errorf("err = %v, want containing %q", err, "forward hop")
+	if !strings.Contains(err.Error(), "upstream hop") {
+		t.Errorf("err = %v, want containing %q", err, "upstream hop")
 	}
 
 	// missing address (empty host)
-	_, err = BuildForwardChain([]string{"socks5://"})
+	_, err = buildUpstream([]string{"socks5://"})
 	if err == nil {
 		t.Fatal("expected error for missing address")
 	}
@@ -194,58 +193,71 @@ func TestBuildForwardChain(t *testing.T) {
 	}
 }
 
-// TestParseArgsInfo tests the success paths of ParseArgsInfo while saving and
-// restoring the package-level globals it mutates. The log.Fatalln error paths
-// are intentionally excluded because they call os.Exit.
-func TestParseArgsInfo(t *testing.T) {
-	// save and restore globals
-	oldProxy := ProxyConfig
-	oldChain := ForwardChain
-	defer func() {
-		ProxyConfig = oldProxy
-		ForwardChain = oldChain
-	}()
-
-	// normal proxy with a forward chain
-	ParseArgsInfo("socks5://host:1080", []string{"http://upstream:8080"}, 0)
-	if ProxyConfig.Scheme != "socks5" {
-		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "socks5")
+// TestLoad tests the success paths of Load.
+func TestLoad(t *testing.T) {
+	// normal proxy with an upstream chain
+	cfg, err := Load("socks5://host:1080", []string{"http://upstream:8080"}, 0)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
-	if ProxyConfig.BindAddr != "host:1080" {
-		t.Errorf("ProxyConfig.BindAddr = %q, want %q", ProxyConfig.BindAddr, "host:1080")
+	if cfg.Listen.Scheme != "socks5" {
+		t.Errorf("Listen.Scheme = %q, want %q", cfg.Listen.Scheme, "socks5")
 	}
-	if len(ForwardChain) != 1 {
-		t.Fatalf("len(ForwardChain) = %d, want 1", len(ForwardChain))
+	if cfg.Listen.Addr != "host:1080" {
+		t.Errorf("Listen.Addr = %q, want %q", cfg.Listen.Addr, "host:1080")
 	}
-	if ForwardChain[0].Scheme != "http" {
-		t.Errorf("ForwardChain[0].Scheme = %q, want %q", ForwardChain[0].Scheme, "http")
+	if len(cfg.Upstream) != 1 {
+		t.Fatalf("len(Upstream) = %d, want 1", len(cfg.Upstream))
+	}
+	if cfg.Upstream[0].Scheme != "http" {
+		t.Errorf("Upstream[0].Scheme = %q, want %q", cfg.Upstream[0].Scheme, "http")
 	}
 
 	// colon-prefixed address -> mix:// scheme
-	ParseArgsInfo(":1080", nil, 0)
-	if ProxyConfig.Scheme != "mix" {
-		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "mix")
+	cfg, err = Load(":1080", nil, 0)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
-	if ProxyConfig.BindAddr != ":1080" {
-		t.Errorf("ProxyConfig.BindAddr = %q, want %q", ProxyConfig.BindAddr, ":1080")
+	if cfg.Listen.Scheme != "mix" {
+		t.Errorf("Listen.Scheme = %q, want %q", cfg.Listen.Scheme, "mix")
 	}
-	if len(ForwardChain) != 0 {
-		t.Errorf("len(ForwardChain) = %d, want 0", len(ForwardChain))
+	if cfg.Listen.Addr != ":1080" {
+		t.Errorf("Listen.Addr = %q, want %q", cfg.Listen.Addr, ":1080")
+	}
+	if len(cfg.Upstream) != 0 {
+		t.Errorf("len(Upstream) = %d, want 0", len(cfg.Upstream))
 	}
 
-	// proxy with auth and no forward chain
-	ParseArgsInfo("socks5://user:pass@host:1080", nil, 0)
-	if ProxyConfig.Scheme != "socks5" {
-		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "socks5")
+	// proxy with auth and no upstream chain
+	cfg, err = Load("socks5://user:pass@host:1080", nil, 0)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
-	if ProxyConfig.Auth == nil {
-		t.Fatal("ProxyConfig.Auth = nil, want non-nil")
+	if cfg.Listen.Scheme != "socks5" {
+		t.Errorf("Listen.Scheme = %q, want %q", cfg.Listen.Scheme, "socks5")
 	}
-	if ProxyConfig.Auth.Username != "user" || ProxyConfig.Auth.Password != "pass" {
-		t.Errorf("Auth = %v, want {user pass}", ProxyConfig.Auth)
+	if cfg.Listen.Auth == nil {
+		t.Fatal("Listen.Auth = nil, want non-nil")
 	}
-	if len(ForwardChain) != 0 {
-		t.Errorf("len(ForwardChain) = %d, want 0", len(ForwardChain))
+	if cfg.Listen.Auth.Username != "user" || cfg.Listen.Auth.Password != "pass" {
+		t.Errorf("Auth = %v, want {user pass}", cfg.Listen.Auth)
+	}
+	if len(cfg.Upstream) != 0 {
+		t.Errorf("len(Upstream) = %d, want 0", len(cfg.Upstream))
+	}
+}
+
+// TestLoadErrors verifies that invalid command line values are returned as
+// errors instead of terminating the process.
+func TestLoadErrors(t *testing.T) {
+	if _, err := Load(":1080", nil, -time.Second); err == nil || !strings.Contains(err.Error(), "negative") {
+		t.Errorf("negative timeout err = %v, want containing %q", err, "negative")
+	}
+	if _, err := Load("http://[::1", nil, 0); err == nil {
+		t.Error("invalid listen address err = nil, want error")
+	}
+	if _, err := Load(":1080", []string{"tcp://host:1"}, 0); err == nil {
+		t.Error("unsupported upstream scheme err = nil, want error")
 	}
 }
 
@@ -267,25 +279,21 @@ func TestValidateTimeout(t *testing.T) {
 	}
 }
 
-// TestParseArgsInfoTimeout verifies that the idle timeout is applied to the
-// tunnel configuration and restored afterwards.
-func TestParseArgsInfoTimeout(t *testing.T) {
-	oldProxy := ProxyConfig
-	oldChain := ForwardChain
-	oldTimeout := constant.TunnelIdleTimeout
-	defer func() {
-		ProxyConfig = oldProxy
-		ForwardChain = oldChain
-		constant.TunnelIdleTimeout = oldTimeout
-	}()
-
-	ParseArgsInfo(":1080", nil, 5*time.Minute)
-	if constant.TunnelIdleTimeout != 5*time.Minute {
-		t.Errorf("TunnelIdleTimeout = %s, want 5m", constant.TunnelIdleTimeout)
+// TestLoadTimeout verifies that the idle timeout is stored in the Config.
+func TestLoadTimeout(t *testing.T) {
+	cfg, err := Load(":1080", nil, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Timeout != 5*time.Minute {
+		t.Errorf("Timeout = %s, want 5m", cfg.Timeout)
 	}
 
-	ParseArgsInfo(":1080", nil, 0)
-	if constant.TunnelIdleTimeout != 0 {
-		t.Errorf("TunnelIdleTimeout = %s, want 0", constant.TunnelIdleTimeout)
+	cfg, err = Load(":1080", nil, 0)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Timeout != 0 {
+		t.Errorf("Timeout = %s, want 0", cfg.Timeout)
 	}
 }

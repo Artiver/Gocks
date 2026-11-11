@@ -12,9 +12,9 @@ import (
 // scheme aware: pass the port explicitly for anything but plain HTTP.
 const defaultPort = "80"
 
-// ParseUrl fills arg from an endpoint URL of the form
+// ParseEndpoint fills arg from an endpoint URL of the form
 // scheme://[user:pass@]host[:port][/forward-target].
-func ParseUrl(str string, arg *Url) error {
+func ParseEndpoint(str string, arg *Endpoint) error {
 	u, err := url.Parse(str)
 	if err != nil {
 		return err
@@ -26,13 +26,12 @@ func ParseUrl(str string, arg *Url) error {
 	}
 
 	arg.Scheme = u.Scheme
-	arg.BindAddr = host
-	arg.TranAddr = strings.TrimPrefix(u.Path, "/")
+	arg.Addr = host
+	arg.Target = strings.TrimPrefix(u.Path, "/")
 	arg.Auth = nil
 
 	username := u.User.Username()
 	password, _ := u.User.Password()
-
 	if username == "" {
 		return nil
 	}

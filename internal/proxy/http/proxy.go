@@ -18,17 +18,34 @@ import (
 	"time"
 )
 
+// Proxy serves HTTP proxy connections.
+type Proxy struct {
+	dialer  *dialer.Dialer
+	auth    *config.Auth
+	timeout time.Duration
+}
+
+// New returns an HTTP proxy configured by cfg.
+func New(cfg config.Config) *Proxy {
+	return &Proxy{
+		dialer:  dialer.New(cfg.Upstream),
+		auth:    cfg.Listen.Auth,
+		timeout: cfg.Timeout,
+	}
+}
+
 // Run serves HTTP proxying until ctx is cancelled.
-func Run(ctx context.Context) error {
-	return server.Serve(ctx, "HTTP proxy", config.ProxyConfig.BindAddr, func(conn net.Conn) {
-		HandleHTTPConnection(conn, nil)
+func Run(ctx context.Context, cfg config.Config) error {
+	p := New(cfg)
+	return server.Serve(ctx, "HTTP proxy", cfg.Listen.Addr, func(conn net.Conn) {
+		p.HandleConnection(conn, nil)
 	})
 }
 
-// HandleHTTPConnection serves one client, reusing the connection for further
+// HandleConnection serves one client, reusing the connection for further
 // requests unless the request or the response says otherwise. firstBuff carries
 // the bytes the mixed-mode dispatcher pre-read to tell HTTP and SOCKS5 apart.
-func HandleHTTPConnection(conn net.Conn, firstBuff []byte) {
+func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
@@ -47,7 +64,7 @@ func HandleHTTPConnection(conn net.Conn, firstBuff []byte) {
 	br := bufio.NewReader(reader)
 
 	for {
-		shouldClose, err := handleOneRequest(br, conn)
+		shouldClose, err := p.handleOneRequest(br, conn)
 		if err != nil {
 			if !isClientGone(err) {
 				log.Println("[HTTP]", err)
@@ -68,7 +85,7 @@ func isClientGone(err error) bool {
 		errors.Is(err, net.ErrClosed)
 }
 
-func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
+func (p *Proxy) handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return true, err
 	}
@@ -83,7 +100,7 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 		return true, err
 	}
 
-	if auth := config.ProxyConfig.Auth; auth != nil && !checkAuthHeader(auth, req.Header.Get(constant.BasicAuthHeader)) {
+	if p.auth != nil && !checkAuthHeader(p.auth, req.Header.Get(constant.BasicAuthHeader)) {
 		if _, err := io.WriteString(conn, authRequiredResponse); err != nil {
 			log.Println("send 407 error:", err)
 		}
@@ -91,17 +108,17 @@ func handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) {
 	}
 
 	if req.Method == constant.ConnectMethod {
-		return handleConnectMethod(conn, br, req)
+		return p.handleConnectMethod(conn, br, req)
 	}
-	return handleProxyMethod(conn, req)
+	return p.handleProxyMethod(conn, req)
 }
 
 // dialTarget resolves the target of req, defaulting to defaultPort when the
 // request carries no port, and connects to it. It answers 502 on failure.
-func dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn, string, error) {
+func (p *Proxy) dialTarget(conn net.Conn, req *http.Request, defaultPort string) (net.Conn, string, error) {
 	addr := targetAddr(req, strings.TrimPrefix(defaultPort, ":"))
 
-	upstream, err := dialer.DialTcpConnection(addr)
+	upstream, err := p.dialer.DialTCP(addr)
 	if err != nil {
 		log.Println(err)
 		if _, werr := io.WriteString(conn, badGatewayResponse); werr != nil {
@@ -129,8 +146,8 @@ func targetAddr(req *http.Request, defaultPort string) string {
 	return addr
 }
 
-func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
-	upstream, addr, err := dialTarget(conn, req, ":443")
+func (p *Proxy) handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bool, error) {
+	upstream, addr, err := p.dialTarget(conn, req, ":443")
 	if err != nil {
 		return true, err
 	}
@@ -142,7 +159,7 @@ func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bo
 
 	// Replay anything the client sent after CONNECT before tunnelling.
 	start := time.Now()
-	stats, err := tunnel.TransportDataStats(upstream, tunnel.NewReaderConn(br, conn))
+	stats, err := tunnel.TransportDataStats(p.timeout, upstream, tunnel.NewReaderConn(br, conn))
 	log.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
 		conn.RemoteAddr(), addr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
@@ -151,8 +168,8 @@ func handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.Request) (bo
 	return true, nil
 }
 
-func handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
-	upstream, addr, err := dialTarget(conn, req, ":80")
+func (p *Proxy) handleProxyMethod(conn net.Conn, req *http.Request) (bool, error) {
+	upstream, addr, err := p.dialTarget(conn, req, ":80")
 	if err != nil {
 		return true, err
 	}

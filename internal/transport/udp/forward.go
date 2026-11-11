@@ -15,8 +15,8 @@ import (
 const udpReceiveTimeout = 3 * time.Second
 
 // Run forwards UDP to the configured target until ctx is cancelled.
-func Run(ctx context.Context) error {
-	listen, err := net.ListenPacket("udp", config.ProxyConfig.BindAddr)
+func Run(ctx context.Context, cfg config.Config) error {
+	listen, err := net.ListenPacket("udp", cfg.Listen.Addr)
 	if err != nil {
 		return err
 	}
@@ -27,7 +27,7 @@ func Run(ctx context.Context) error {
 		listen.Close()
 	}()
 
-	log.Println("UDP port listening", config.ProxyConfig.BindAddr)
+	log.Println("UDP port listening", cfg.Listen.Addr)
 
 	buffer := make([]byte, constant.UDPBufferSize)
 	for {
@@ -47,19 +47,19 @@ func Run(ctx context.Context) error {
 		// before it is handed to its own goroutine.
 		payload := make([]byte, size)
 		copy(payload, buffer[:size])
-		go handleRequest(payload, clientAddr, listen)
+		go handleRequest(payload, clientAddr, listen, cfg.Listen.Target)
 	}
 }
 
-func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn) {
+func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn, target string) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
 		}
 	}()
-	forwardConn, err := net.Dial("udp", config.ProxyConfig.TranAddr)
+	forwardConn, err := net.Dial("udp", target)
 	if err != nil {
-		log.Printf("Failed to forward to %s: %v", config.ProxyConfig.TranAddr, err)
+		log.Printf("Failed to forward to %s: %v", target, err)
 		return
 	}
 	defer forwardConn.Close()

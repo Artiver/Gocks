@@ -58,11 +58,11 @@ func TestHostWithPort(t *testing.T) {
 	}
 }
 
-// TestParseUrl covers all schemes (socks5, http, tcp, udp), with and without
-// auth, with and without explicit port, IPv4/IPv6 hosts, the /target path form,
-// trailing slash, empty-user-with-password, special characters in password, and
-// every error path (invalid URL, oversized credentials).
-func TestParseUrl(t *testing.T) {
+// TestParseEndpoint covers all schemes (socks5, http, tcp, udp), with and
+// without auth, with and without explicit port, IPv4/IPv6 hosts, the /target
+// path form, trailing slash, empty-user-with-password, special characters in
+// password, and every error path (invalid URL, oversized credentials).
+func TestParseEndpoint(t *testing.T) {
 	longUser := strings.Repeat("a", 256)
 	longPass := strings.Repeat("p", 256)
 
@@ -70,8 +70,8 @@ func TestParseUrl(t *testing.T) {
 		name       string
 		input      string
 		wantScheme string
-		wantBind   string
-		wantTran   string
+		wantAddr   string
+		wantTarget string
 		wantUser   string
 		wantPass   string
 		wantAuth   bool
@@ -86,7 +86,7 @@ func TestParseUrl(t *testing.T) {
 		{"http with auth default port", "http://user:pass@host", "http", "host:80", "", "user", "pass", true, false, ""},
 		// tcp with forward target
 		{"tcp with target", "tcp://host:1234/target", "tcp", "host:1234", "target", "", "", false, false, ""},
-		// udp trailing slash -> empty TranAddr
+		// udp trailing slash -> empty Target
 		{"udp trailing slash", "udp://host:5678/", "udp", "host:5678", "", "", "", false, false, ""},
 		// IPv6 hosts
 		{"ipv6 with target", "tcp://[::1]:1080/target", "tcp", "[::1]:1080", "target", "", "", false, false, ""},
@@ -107,28 +107,28 @@ func TestParseUrl(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var arg Url
-			err := ParseUrl(tt.input, &arg)
+			var arg Endpoint
+			err := ParseEndpoint(tt.input, &arg)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("ParseUrl(%q) err = nil, want error", tt.input)
+					t.Fatalf("ParseEndpoint(%q) err = nil, want error", tt.input)
 				}
 				if tt.errSub != "" && !strings.Contains(err.Error(), tt.errSub) {
-					t.Errorf("ParseUrl(%q) err = %v, want error containing %q", tt.input, err, tt.errSub)
+					t.Errorf("ParseEndpoint(%q) err = %v, want error containing %q", tt.input, err, tt.errSub)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ParseUrl(%q) err = %v, want nil", tt.input, err)
+				t.Fatalf("ParseEndpoint(%q) err = %v, want nil", tt.input, err)
 			}
 			if arg.Scheme != tt.wantScheme {
 				t.Errorf("Scheme = %q, want %q", arg.Scheme, tt.wantScheme)
 			}
-			if arg.BindAddr != tt.wantBind {
-				t.Errorf("BindAddr = %q, want %q", arg.BindAddr, tt.wantBind)
+			if arg.Addr != tt.wantAddr {
+				t.Errorf("Addr = %q, want %q", arg.Addr, tt.wantAddr)
 			}
-			if arg.TranAddr != tt.wantTran {
-				t.Errorf("TranAddr = %q, want %q", arg.TranAddr, tt.wantTran)
+			if arg.Target != tt.wantTarget {
+				t.Errorf("Target = %q, want %q", arg.Target, tt.wantTarget)
 			}
 			if tt.wantAuth {
 				if arg.Auth == nil {

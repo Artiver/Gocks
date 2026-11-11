@@ -31,7 +31,7 @@ func startEchoServer(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-func startSocks5Server(t *testing.T) string {
+func startSocks5Server(t *testing.T, p *Proxy) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -44,24 +44,16 @@ func startSocks5Server(t *testing.T) string {
 			if err != nil {
 				return
 			}
-			go HandleSocks5Connection(c, nil)
+			go p.HandleConnection(c, nil)
 		}
 	}()
 	return ln.Addr().String()
 }
 
 func TestHandleSocks5Connect(t *testing.T) {
-	oldProxy := config.ProxyConfig
-	oldChain := config.ForwardChain
-	config.ProxyConfig = config.Url{}
-	config.ForwardChain = nil
-	t.Cleanup(func() {
-		config.ProxyConfig = oldProxy
-		config.ForwardChain = oldChain
-	})
-
+	p := New(config.Config{})
 	target := startEchoServer(t)
-	proxyAddr := startSocks5Server(t)
+	proxyAddr := startSocks5Server(t, p)
 
 	conn, err := net.Dial("tcp", proxyAddr)
 	if err != nil {
@@ -111,11 +103,11 @@ func TestHandleSocks5Connect(t *testing.T) {
 }
 
 func TestHandleSocks5RejectsNoAuthWhenCredentialsConfigured(t *testing.T) {
-	oldProxy := config.ProxyConfig
-	config.ProxyConfig = config.Url{Auth: &config.Auth{Username: "user", Password: "pass"}}
-	t.Cleanup(func() { config.ProxyConfig = oldProxy })
+	p := New(config.Config{Listen: config.Endpoint{
+		Auth: &config.Auth{Username: "user", Password: "pass"},
+	}})
+	proxyAddr := startSocks5Server(t, p)
 
-	proxyAddr := startSocks5Server(t)
 	conn, err := net.Dial("tcp", proxyAddr)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)

@@ -20,7 +20,7 @@ func credential(auth *config.Auth) *socks5proto.Credential {
 
 // dialSocks5Hop performs the SOCKS5 client handshake with hop over the already
 // established conn and asks it to connect to address.
-func dialSocks5Hop(conn net.Conn, hop config.Url, address string) error {
+func dialSocks5Hop(conn net.Conn, hop config.Endpoint, address string) error {
 	if err := conn.SetDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}
@@ -63,8 +63,8 @@ func exchange(conn net.Conn, cmd byte, addr *socks5proto.Addr) (*socks5proto.Rep
 // An association is inherently single-hop: the relay address is only
 // meaningful to a client sitting where hop is reachable, so the caller refuses
 // a multi-hop chain before getting here.
-func DialSocks5UDPAssociate(hop config.Url) (net.Conn, *socks5proto.Addr, error) {
-	conn, err := net.DialTimeout("tcp", hop.BindAddr, constant.TcpConnectTimeout)
+func DialSocks5UDPAssociate(hop config.Endpoint) (net.Conn, *socks5proto.Addr, error) {
+	conn, err := net.DialTimeout("tcp", hop.Addr, constant.TcpConnectTimeout)
 	if err != nil {
 		return nil, nil, err
 	}

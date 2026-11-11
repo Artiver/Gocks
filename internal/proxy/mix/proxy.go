@@ -4,7 +4,6 @@ import (
 	"context"
 	"gocks/internal/config"
 	"gocks/internal/constant"
-
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/proxy/http"
 	"gocks/internal/proxy/socks5"
@@ -19,15 +18,19 @@ import (
 const defaultReadBytes = 512
 
 // Run serves the HTTP+SOCKS5 mixed proxy until ctx is cancelled.
-func Run(ctx context.Context) error {
-	return server.Serve(ctx, "HTTP+SOCKS5 proxy", config.ProxyConfig.BindAddr, chooseProxy)
+func Run(ctx context.Context, cfg config.Config) error {
+	httpProxy := http.New(cfg)
+	socks5Proxy := socks5.New(cfg)
+	return server.Serve(ctx, "HTTP+SOCKS5 proxy", cfg.Listen.Addr, func(conn net.Conn) {
+		chooseProxy(conn, httpProxy, socks5Proxy)
+	})
 }
 
 // chooseProxy peeks at the first byte to tell the two protocols apart: a SOCKS5
 // client always opens with its version byte, anything else is treated as HTTP.
 // The pre-read bytes are handed to the chosen handler so its parser sees the
 // complete opening message.
-func chooseProxy(conn net.Conn) {
+func chooseProxy(conn net.Conn, httpProxy *http.Proxy, socks5Proxy *socks5.Proxy) {
 	buff := make([]byte, defaultReadBytes)
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		log.Printf("set read deadline error: %v", err)
@@ -47,8 +50,8 @@ func chooseProxy(conn net.Conn) {
 	}
 
 	if buff[0] == socks5proto.Version {
-		socks5.HandleSocks5Connection(conn, buff[:n])
+		socks5Proxy.HandleConnection(conn, buff[:n])
 		return
 	}
-	http.HandleHTTPConnection(conn, buff[:n])
+	httpProxy.HandleConnection(conn, buff[:n])
 }

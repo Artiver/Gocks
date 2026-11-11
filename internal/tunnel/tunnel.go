@@ -3,7 +3,6 @@ package tunnel
 import (
 	"context"
 	"errors"
-	"gocks/internal/constant"
 	"io"
 	"net"
 	"sync/atomic"
@@ -15,7 +14,7 @@ import (
 var ErrNotSupported = errors.New("tunnel: half-close not supported")
 
 // ErrIdleTimeout is returned when a tunnel is closed because neither direction
-// made progress for the whole IdleTimeout window.
+// made progress for the whole idle timeout window.
 var ErrIdleTimeout = errors.New("tunnel: idle timeout")
 
 // TransportStats reports the bytes copied in each direction.
@@ -31,9 +30,10 @@ type result struct {
 	err error
 }
 
-// TransportDataStats is TransportData that also reports byte counts.
-func TransportDataStats(source, target net.Conn) (TransportStats, error) {
-	return TransportDataContextStats(context.Background(), source, target)
+// TransportDataStats is TransportDataContextStats without a cancellable
+// context.
+func TransportDataStats(timeout time.Duration, source, target net.Conn) (TransportStats, error) {
+	return TransportDataContextStats(context.Background(), timeout, source, target)
 }
 
 // TransportDataContextStats proxies data bidirectionally between source and
@@ -41,7 +41,9 @@ func TransportDataStats(source, target net.Conn) (TransportStats, error) {
 // when it ends, so the peer sees an EOF instead of a stalled connection. When
 // a connection cannot be half-closed it is closed outright, which also
 // unblocks the other direction. Cancelling ctx force-closes both connections.
-func TransportDataContextStats(ctx context.Context, source, target net.Conn) (TransportStats, error) {
+// A positive timeout closes the tunnel when neither direction makes progress
+// for that long; zero disables the idle timeout.
+func TransportDataContextStats(ctx context.Context, timeout time.Duration, source, target net.Conn) (TransportStats, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -54,11 +56,11 @@ func TransportDataContextStats(ctx context.Context, source, target net.Conn) (Tr
 
 	errCh := make(chan result, 2)
 	go func() {
-		n, err := copyHalf(ctx, target, source, &lastActivity)
+		n, err := copyHalf(ctx, target, source, &lastActivity, timeout)
 		errCh <- result{0, n, err}
 	}()
 	go func() {
-		n, err := copyHalf(ctx, source, target, &lastActivity)
+		n, err := copyHalf(ctx, source, target, &lastActivity, timeout)
 		errCh <- result{1, n, err}
 	}()
 
@@ -112,7 +114,7 @@ func isBenign(err error) bool {
 // lastActivity is shared with the opposite direction: every successful read
 // refreshes it, and the read deadline is computed from it, so progress on the
 // peer side keeps this side alive even when it is itself idle.
-func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64) (int64, error) {
+func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64, timeout time.Duration) (int64, error) {
 	defer func() {
 		closeRead(src)
 		closeWrite(dst)
@@ -127,9 +129,9 @@ func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64
 		default:
 		}
 
-		if constant.TunnelIdleTimeout > 0 {
+		if timeout > 0 {
 			if rd, ok := src.(interface{ SetReadDeadline(time.Time) error }); ok {
-				deadline := time.Unix(0, lastActivity.Load()).Add(constant.TunnelIdleTimeout)
+				deadline := time.Unix(0, lastActivity.Load()).Add(timeout)
 				now := time.Now()
 				if !deadline.After(now) {
 					return total, ErrIdleTimeout
@@ -157,8 +159,8 @@ func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64
 			// A read-deadline expiry may just mean the peer refreshed the
 			// shared activity clock while we were blocked. Re-check and either
 			// renew our deadline or declare the whole tunnel idle.
-			if constant.TunnelIdleTimeout > 0 && isTimeoutErr(er) {
-				deadline := time.Unix(0, lastActivity.Load()).Add(constant.TunnelIdleTimeout)
+			if timeout > 0 && isTimeoutErr(er) {
+				deadline := time.Unix(0, lastActivity.Load()).Add(timeout)
 				if time.Now().Before(deadline) {
 					continue
 				}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gocks/internal/config"
 	"gocks/internal/constant"
+	"gocks/internal/dialer"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/server"
 	"gocks/internal/tunnel"
@@ -14,17 +15,34 @@ import (
 	"time"
 )
 
+// Proxy serves SOCKS5 connections.
+type Proxy struct {
+	dialer  *dialer.Dialer
+	auth    *config.Auth
+	timeout time.Duration
+}
+
+// New returns a SOCKS5 proxy configured by cfg.
+func New(cfg config.Config) *Proxy {
+	return &Proxy{
+		dialer:  dialer.New(cfg.Upstream),
+		auth:    cfg.Listen.Auth,
+		timeout: cfg.Timeout,
+	}
+}
+
 // Run serves SOCKS5 until ctx is cancelled.
-func Run(ctx context.Context) error {
-	return server.Serve(ctx, "SOCKS5 proxy", config.ProxyConfig.BindAddr, func(conn net.Conn) {
-		HandleSocks5Connection(conn, nil)
+func Run(ctx context.Context, cfg config.Config) error {
+	p := New(cfg)
+	return server.Serve(ctx, "SOCKS5 proxy", cfg.Listen.Addr, func(conn net.Conn) {
+		p.HandleConnection(conn, nil)
 	})
 }
 
-// HandleSocks5Connection serves one client. firstBuff carries the bytes the
+// HandleConnection serves one client. firstBuff carries the bytes the
 // mixed-mode dispatcher pre-read to tell HTTP and SOCKS5 apart; they are
 // replayed so the handshake sees the complete client greeting.
-func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
+func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
@@ -40,7 +58,7 @@ func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
 		}
 	}()
 
-	clientID, err := socks5Handshake(conn)
+	clientID, err := p.handshake(conn)
 	if err != nil {
 		log.Println("Handshake error:", err)
 		return
@@ -49,32 +67,31 @@ func HandleSocks5Connection(conn net.Conn, firstBuff []byte) {
 		log.Printf("[SOCKS5] client %q from %s", clientID, conn.RemoteAddr())
 	}
 
-	if err := socks5HandleRequest(conn); err != nil {
+	if err := p.handleRequest(conn); err != nil {
 		log.Println("Request handling error:", err)
 	}
 }
 
-func socks5Handshake(conn net.Conn) (string, error) {
+func (p *Proxy) handshake(conn net.Conn) (string, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return "", err
 	}
-	return socks5proto.ServerHandshake(conn, newSelector())
+	return socks5proto.ServerHandshake(conn, p.selector())
 }
 
-// newSelector builds the authentication selector from the proxy configuration.
+// selector builds the authentication selector from the proxy configuration.
 // Authentication is mandatory when credentials were configured via -L.
-func newSelector() socks5proto.Selector {
-	auth := config.ProxyConfig.Auth
-	if auth == nil {
+func (p *Proxy) selector() socks5proto.Selector {
+	if p.auth == nil {
 		return socks5proto.NewServerSelector()
 	}
 	return socks5proto.NewServerSelector(socks5proto.Credential{
-		Username: auth.Username,
-		Password: auth.Password,
+		Username: p.auth.Username,
+		Password: p.auth.Password,
 	})
 }
 
-func socks5HandleRequest(conn net.Conn) error {
+func (p *Proxy) handleRequest(conn net.Conn) error {
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
 		return err
 	}
@@ -98,11 +115,11 @@ func socks5HandleRequest(conn net.Conn) error {
 
 	switch req.Cmd {
 	case socks5proto.CmdConnect:
-		return handleConnect(conn, req.Addr)
+		return p.handleConnect(conn, req.Addr)
 	case socks5proto.CmdBind:
-		return handleBind(conn, req.Addr)
+		return p.handleBind(conn, req.Addr)
 	case socks5proto.CmdUDP:
-		return handleUDPAssociate(conn)
+		return p.handleUDPAssociate(conn)
 	default:
 		if werr := writeReply(conn, socks5proto.RepCmdUnsupported, nil); werr != nil {
 			log.Println("write reply error:", werr)

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"gocks/internal/constant"
 	"io"
 	"net"
 	"sync"
@@ -193,7 +192,7 @@ func runBidirectional(t *testing.T, clientPayload, serverPayload []byte) Transpo
 		pipeCloseWrite(serverSide)
 	}()
 
-	stats, err := TransportDataStats(source, target)
+	stats, err := TransportDataStats(0, source, target)
 	if err != nil {
 		t.Fatalf("TransportDataStats: %v", err)
 	}
@@ -244,7 +243,7 @@ func TestTransportDataContextStats_Cancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		TransportDataContextStats(ctx, source, target)
+		TransportDataContextStats(ctx, 0, source, target)
 		close(done)
 	}()
 
@@ -271,7 +270,7 @@ func TestCopyHalf_ReadError(t *testing.T) {
 	go io.Copy(io.Discard, dstOther)
 
 	src := &readErrConn{readErr: errors.New("read failure")}
-	n, err := copyHalf(context.Background(), dst, src, newLastActivity())
+	n, err := copyHalf(context.Background(), dst, src, newLastActivity(), 0)
 	if err == nil || err.Error() != "read failure" {
 		t.Errorf("err = %v, want 'read failure'", err)
 	}
@@ -293,7 +292,7 @@ func TestCopyHalf_ContextCanceled(t *testing.T) {
 
 	go io.Copy(io.Discard, dstOther)
 
-	n, err := copyHalf(ctx, dst, src, newLastActivity())
+	n, err := copyHalf(ctx, dst, src, newLastActivity(), 0)
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
@@ -317,7 +316,7 @@ func TestCopyHalf_WriteError(t *testing.T) {
 		srcOther.Close() // net.Pipe lacks CloseWrite; Close to unblock src.Read
 	}()
 
-	_, err := copyHalf(context.Background(), dst, src, newLastActivity())
+	_, err := copyHalf(context.Background(), dst, src, newLastActivity(), 0)
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -339,7 +338,7 @@ func TestCopyHalf_ShortWrite(t *testing.T) {
 	}()
 	go io.Copy(io.Discard, dstOther)
 
-	_, err := copyHalf(context.Background(), sw, src, newLastActivity())
+	_, err := copyHalf(context.Background(), sw, src, newLastActivity(), 0)
 	if err != io.ErrShortWrite {
 		t.Errorf("err = %v, want io.ErrShortWrite", err)
 	}
@@ -473,9 +472,7 @@ func TestHalfClose_OppositeDirectionDrainable(t *testing.T) {
 // times out once both directions go quiet. This is the regression test for the
 // "large download cut off after IdleTimeout" bug.
 func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
-	old := constant.TunnelIdleTimeout
-	constant.TunnelIdleTimeout = 100 * time.Millisecond
-	defer func() { constant.TunnelIdleTimeout = old }()
+	const timeout = 100 * time.Millisecond
 
 	src, srcOther := tcpPair(t)
 	defer src.Close()
@@ -491,7 +488,7 @@ func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := copyHalf(ctx, dst, src, lastActivity)
+		_, err := copyHalf(ctx, dst, src, lastActivity, timeout)
 		done <- err
 	}()
 
@@ -530,15 +527,11 @@ func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
 	}
 }
 
-// TestCopyHalf_IdleDisabled verifies that a zero TunnelIdleTimeout leaves the
+// TestCopyHalf_IdleDisabled verifies that a zero idle timeout leaves the
 // tunnel open: copyHalf must not return ErrIdleTimeout even when both sides are
 // silent for several former timeout windows, and must still end normally when
 // a peer closes.
 func TestCopyHalf_IdleDisabled(t *testing.T) {
-	old := constant.TunnelIdleTimeout
-	constant.TunnelIdleTimeout = 0
-	defer func() { constant.TunnelIdleTimeout = old }()
-
 	src, srcOther := tcpPair(t)
 	defer src.Close()
 	defer srcOther.Close()
@@ -553,7 +546,7 @@ func TestCopyHalf_IdleDisabled(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := copyHalf(ctx, dst, src, lastActivity)
+		_, err := copyHalf(ctx, dst, src, lastActivity, 0)
 		done <- err
 	}()
 
@@ -580,9 +573,6 @@ func TestCopyHalf_IdleDisabled(t *testing.T) {
 // transport with a one-way stream (server->client) that outlasts IdleTimeout,
 // confirming the silent client->server half does not tear down the tunnel.
 func TestTransportData_IdleSurvivesAsymmetricFlow(t *testing.T) {
-	old := constant.TunnelIdleTimeout
-	constant.TunnelIdleTimeout = 100 * time.Millisecond
-	defer func() { constant.TunnelIdleTimeout = old }()
 
 	// client <-> proxy-side source ; server <-> proxy-side target
 	client, pSrc := tcpPair(t)
@@ -595,7 +585,7 @@ func TestTransportData_IdleSurvivesAsymmetricFlow(t *testing.T) {
 	statsCh := make(chan TransportStats, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		st, err := TransportDataStats(pSrc, pDst)
+		st, err := TransportDataStats(100*time.Millisecond, pSrc, pDst)
 		statsCh <- st
 		errCh <- err
 	}()

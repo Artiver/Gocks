@@ -18,7 +18,7 @@ const bindWaitTimeout = 2 * time.Minute
 // while BIND was waiting for the peer.
 var errBindControlClosed = errors.New("bind: control connection closed")
 
-func handleBind(conn net.Conn, addr *socks5proto.Addr) error {
+func (p *Proxy) handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 	listener, err := net.Listen(bindNetwork(addr), addr.String())
 	if err != nil {
 		return failReply(conn, err)
@@ -86,7 +86,7 @@ func handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 	log.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetConn.RemoteAddr())
 
 	start := time.Now()
-	stats, err := tunnel.TransportDataStats(targetConn, tunnel.NewReaderConn(br, conn))
+	stats, err := tunnel.TransportDataStats(p.timeout, targetConn, tunnel.NewReaderConn(br, conn))
 	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%s sent, %s received)",
 		clientAddr, targetConn.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err
