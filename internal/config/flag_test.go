@@ -1,8 +1,10 @@
 package config
 
 import (
+	"gocks/internal/constant"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestForwardListSet verifies that Set splits comma-separated values, trims
@@ -205,7 +207,7 @@ func TestParseArgsInfo(t *testing.T) {
 	}()
 
 	// normal proxy with a forward chain
-	ParseArgsInfo("socks5://host:1080", []string{"http://upstream:8080"})
+	ParseArgsInfo("socks5://host:1080", []string{"http://upstream:8080"}, 0)
 	if ProxyConfig.Scheme != "socks5" {
 		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "socks5")
 	}
@@ -220,7 +222,7 @@ func TestParseArgsInfo(t *testing.T) {
 	}
 
 	// colon-prefixed address -> mix:// scheme
-	ParseArgsInfo(":1080", nil)
+	ParseArgsInfo(":1080", nil, 0)
 	if ProxyConfig.Scheme != "mix" {
 		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "mix")
 	}
@@ -232,7 +234,7 @@ func TestParseArgsInfo(t *testing.T) {
 	}
 
 	// proxy with auth and no forward chain
-	ParseArgsInfo("socks5://user:pass@host:1080", nil)
+	ParseArgsInfo("socks5://user:pass@host:1080", nil, 0)
 	if ProxyConfig.Scheme != "socks5" {
 		t.Errorf("ProxyConfig.Scheme = %q, want %q", ProxyConfig.Scheme, "socks5")
 	}
@@ -244,5 +246,46 @@ func TestParseArgsInfo(t *testing.T) {
 	}
 	if len(ForwardChain) != 0 {
 		t.Errorf("len(ForwardChain) = %d, want 0", len(ForwardChain))
+	}
+}
+
+// TestValidateTimeout verifies that zero and positive durations pass and that a
+// negative duration is rejected.
+func TestValidateTimeout(t *testing.T) {
+	for _, d := range []time.Duration{0, time.Second, 5 * time.Minute} {
+		if err := ValidateTimeout(d); err != nil {
+			t.Errorf("ValidateTimeout(%s) = %v, want nil", d, err)
+		}
+	}
+
+	err := ValidateTimeout(-time.Second)
+	if err == nil {
+		t.Fatal("ValidateTimeout(-1s) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "negative") {
+		t.Errorf("err = %v, want containing %q", err, "negative")
+	}
+}
+
+// TestParseArgsInfoTimeout verifies that the idle timeout is applied to the
+// tunnel configuration and restored afterwards.
+func TestParseArgsInfoTimeout(t *testing.T) {
+	oldProxy := ProxyConfig
+	oldChain := ForwardChain
+	oldTimeout := constant.TunnelIdleTimeout
+	defer func() {
+		ProxyConfig = oldProxy
+		ForwardChain = oldChain
+		constant.TunnelIdleTimeout = oldTimeout
+	}()
+
+	ParseArgsInfo(":1080", nil, 5*time.Minute)
+	if constant.TunnelIdleTimeout != 5*time.Minute {
+		t.Errorf("TunnelIdleTimeout = %s, want 5m", constant.TunnelIdleTimeout)
+	}
+
+	ParseArgsInfo(":1080", nil, 0)
+	if constant.TunnelIdleTimeout != 0 {
+		t.Errorf("TunnelIdleTimeout = %s, want 0", constant.TunnelIdleTimeout)
 	}
 }

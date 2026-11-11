@@ -190,7 +190,7 @@ func (r *udpRelay) runUpstream(ctx context.Context) {
 	go func() {
 		ubuf := make([]byte, udpBufferSize)
 		for {
-			if err := r.upstreamConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+			if err := r.upstreamConn.SetReadDeadline(time.Now().Add(constant.UDPIdleTimeout)); err != nil {
 				return
 			}
 			n, err := r.upstreamConn.Read(ubuf)
@@ -242,7 +242,7 @@ func (r *udpRelay) runUpstream(ctx context.Context) {
 // should keep relaying; a non-nil error means the relay must stop. wire aliases
 // buf.
 func (r *udpRelay) readClient(buf []byte) (*clientPacket, error) {
-	if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+	if err := r.clientConn.SetReadDeadline(time.Now().Add(constant.UDPIdleTimeout)); err != nil {
 		return nil, err
 	}
 	n, src, err := r.clientConn.ReadFromUDP(buf)
@@ -305,7 +305,7 @@ func (r *udpRelay) pump(key string, s *udpSession, target *net.UDPAddr) {
 	srcAddr := &socks5proto.Addr{Host: target.IP.String(), Port: uint16(target.Port)}
 	buf := make([]byte, udpBufferSize)
 	for {
-		if err := s.conn.SetReadDeadline(time.Now().Add(constant.IdleTimeout)); err != nil {
+		if err := s.conn.SetReadDeadline(time.Now().Add(constant.UDPIdleTimeout)); err != nil {
 			return
 		}
 		n, err := s.conn.Read(buf)

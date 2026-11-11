@@ -16,22 +16,26 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var proxyAddr string
 var forwardAddrs config.ForwardList
+var idleTimeout time.Duration
 
 func init() {
 	flag.StringVar(&proxyAddr, "L", ":8181", "ProxyConfig Listen Address")
 	flag.Var(&forwardAddrs, "F", "Upstream proxy address (repeatable, or a comma-separated list; nearest hop first)")
+	flag.DurationVar(&idleTimeout, "timeout", 0, "Tunnel idle timeout (e.g. 30s, 5m); 0 disables it")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Lmicroseconds)
 }
 
 func main() {
-	config.ParseArgsInfo(proxyAddr, forwardAddrs)
+	config.ParseArgsInfo(proxyAddr, forwardAddrs, idleTimeout)
 	logForwardChain()
+	logIdleTimeout()
 
 	// Shut down cleanly on Ctrl+C / SIGTERM by cancelling the run context.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -69,4 +73,15 @@ func logForwardChain() {
 		hops = append(hops, fmt.Sprintf("[%d] %s://%s", i, hop.Scheme, hop.BindAddr))
 	}
 	log.Printf("forward chain: %s -> target", strings.Join(hops, " -> "))
+}
+
+// logIdleTimeout prints the effective tunnel idle timeout so the running
+// configuration can be confirmed from the log. Zero is reported as "disabled"
+// rather than "0s" to avoid misreading it as an instantaneous timeout.
+func logIdleTimeout() {
+	if constant.TunnelIdleTimeout <= 0 {
+		log.Println("tunnel idle timeout: disabled")
+		return
+	}
+	log.Printf("tunnel idle timeout: %s", constant.TunnelIdleTimeout)
 }

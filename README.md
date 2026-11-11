@@ -11,7 +11,7 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 - Socks5代理（CONNECT / BIND / UDP ASSOCIATE）
 - 混合代理（同一端口同时接受 HTTP 与 Socks5 请求）
 - 支持多级代理链（多个 `-F`），每跳独立协议与认证
-- 空闲超时（5 分钟无数据即断开），SIGINT/SIGTERM 优雅退出
+- 空闲超时可配置（`--timeout`，默认 `0` 表示不因空闲断开），SIGINT/SIGTERM 优雅退出
 
 # 目录
 
@@ -51,6 +51,23 @@ make all
 编译后，直接执行对应二进制文件即可开启`:8181`监听HTTP和Socks5代理请求。
 
 # 参数
+
+## 通用选项
+
+`--timeout` 控制隧道空闲超时（任一方向有数据流动即刷新计时），默认 `0`，表示不因空闲自动断开：
+
+```shell
+# 不自动断开（默认）
+Gocks_windows_amd64.exe -L :8181 --timeout 0
+
+# 5 分钟无数据交互后关闭通道（旧版本行为）
+Gocks_windows_amd64.exe -L :8181 --timeout 5m
+
+# 30 秒无数据交互后关闭通道，可用于 TCP 端口转发
+Gocks_windows_amd64.exe -L tcp://:8181/10.0.0.5:3389 --timeout 30s
+```
+
+作用范围为 HTTP CONNECT、SOCKS5 CONNECT/BIND、TCP 端口转发；SOCKS5 UDP ASSOCIATE 仍使用独立的 300 秒会话回收超时，不受该选项影响。负值会在启动时报错。
 
 ## 端口转发
 

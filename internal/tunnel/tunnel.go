@@ -127,9 +127,9 @@ func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64
 		default:
 		}
 
-		if constant.IdleTimeout > 0 {
+		if constant.TunnelIdleTimeout > 0 {
 			if rd, ok := src.(interface{ SetReadDeadline(time.Time) error }); ok {
-				deadline := time.Unix(0, lastActivity.Load()).Add(constant.IdleTimeout)
+				deadline := time.Unix(0, lastActivity.Load()).Add(constant.TunnelIdleTimeout)
 				now := time.Now()
 				if !deadline.After(now) {
 					return total, ErrIdleTimeout
@@ -157,8 +157,8 @@ func copyHalf(ctx context.Context, dst, src net.Conn, lastActivity *atomic.Int64
 			// A read-deadline expiry may just mean the peer refreshed the
 			// shared activity clock while we were blocked. Re-check and either
 			// renew our deadline or declare the whole tunnel idle.
-			if constant.IdleTimeout > 0 && isTimeoutErr(er) {
-				deadline := time.Unix(0, lastActivity.Load()).Add(constant.IdleTimeout)
+			if constant.TunnelIdleTimeout > 0 && isTimeoutErr(er) {
+				deadline := time.Unix(0, lastActivity.Load()).Add(constant.TunnelIdleTimeout)
 				if time.Now().Before(deadline) {
 					continue
 				}

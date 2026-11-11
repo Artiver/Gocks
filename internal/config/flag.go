@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gocks/internal/constant"
 )
@@ -38,7 +39,12 @@ func (l *ForwardList) Set(value string) error {
 	return nil
 }
 
-func ParseArgsInfo(proxyAddr string, forwardAddrs []string) {
+func ParseArgsInfo(proxyAddr string, forwardAddrs []string, idleTimeout time.Duration) {
+	if err := ValidateTimeout(idleTimeout); err != nil {
+		log.Fatalln(err)
+	}
+	constant.TunnelIdleTimeout = idleTimeout
+
 	if strings.HasPrefix(proxyAddr, ":") {
 		proxyAddr = "mix://" + proxyAddr
 	}
@@ -52,6 +58,15 @@ func ParseArgsInfo(proxyAddr string, forwardAddrs []string) {
 		log.Fatalln(err)
 	}
 	ForwardChain = chain
+}
+
+// ValidateTimeout rejects a negative idle timeout. Zero is valid and means the
+// tunnel idle timeout is disabled.
+func ValidateTimeout(d time.Duration) error {
+	if d < 0 {
+		return fmt.Errorf("timeout must not be negative: %s", d)
+	}
+	return nil
 }
 
 // BuildForwardChain parses -F values into the hop list in dial order: the

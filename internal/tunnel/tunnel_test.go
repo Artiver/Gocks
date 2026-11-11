@@ -473,9 +473,9 @@ func TestHalfClose_OppositeDirectionDrainable(t *testing.T) {
 // times out once both directions go quiet. This is the regression test for the
 // "large download cut off after IdleTimeout" bug.
 func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
-	old := constant.IdleTimeout
-	constant.IdleTimeout = 100 * time.Millisecond
-	defer func() { constant.IdleTimeout = old }()
+	old := constant.TunnelIdleTimeout
+	constant.TunnelIdleTimeout = 100 * time.Millisecond
+	defer func() { constant.TunnelIdleTimeout = old }()
 
 	src, srcOther := tcpPair(t)
 	defer src.Close()
@@ -530,13 +530,59 @@ func TestCopyHalf_IdleRenewedByPeer(t *testing.T) {
 	}
 }
 
+// TestCopyHalf_IdleDisabled verifies that a zero TunnelIdleTimeout leaves the
+// tunnel open: copyHalf must not return ErrIdleTimeout even when both sides are
+// silent for several former timeout windows, and must still end normally when
+// a peer closes.
+func TestCopyHalf_IdleDisabled(t *testing.T) {
+	old := constant.TunnelIdleTimeout
+	constant.TunnelIdleTimeout = 0
+	defer func() { constant.TunnelIdleTimeout = old }()
+
+	src, srcOther := tcpPair(t)
+	defer src.Close()
+	defer srcOther.Close()
+	dst, dstOther := tcpPair(t)
+	defer dst.Close()
+	defer dstOther.Close()
+	go io.Copy(io.Discard, dstOther) // drain anything copyHalf writes
+
+	lastActivity := newLastActivity()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := copyHalf(ctx, dst, src, lastActivity)
+		done <- err
+	}()
+
+	// No read deadline should be installed, so the copy keeps blocking.
+	select {
+	case err := <-done:
+		t.Fatalf("copyHalf returned %v with idle timeout disabled", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// It must still tear down normally when the peer ends.
+	srcOther.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("err = %v, want nil after peer close", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("copyHalf did not return after peer closed")
+	}
+}
+
 // TestTransportData_IdleSurvivesAsymmetricFlow drives the full bidirectional
 // transport with a one-way stream (server->client) that outlasts IdleTimeout,
 // confirming the silent client->server half does not tear down the tunnel.
 func TestTransportData_IdleSurvivesAsymmetricFlow(t *testing.T) {
-	old := constant.IdleTimeout
-	constant.IdleTimeout = 100 * time.Millisecond
-	defer func() { constant.IdleTimeout = old }()
+	old := constant.TunnelIdleTimeout
+	constant.TunnelIdleTimeout = 100 * time.Millisecond
+	defer func() { constant.TunnelIdleTimeout = old }()
 
 	// client <-> proxy-side source ; server <-> proxy-side target
 	client, pSrc := tcpPair(t)

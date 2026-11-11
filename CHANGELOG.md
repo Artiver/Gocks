@@ -1,3 +1,20 @@
+# 2026.11.11
+
+## 可配置的通道空闲超时
+
+新增 `--timeout` 选项，默认 `0`，表示通道不因空闲自动关闭。
+
+`internal/constant/protocol.go` 将原 `IdleTimeout` 拆分为两个独立变量：
+
+- `TunnelIdleTimeout`（默认 `0`，禁用）：仅用于 `internal/tunnel` 的 TCP 通道；任一方向有数据流动即刷新共享活动时钟，整条通道空闲满窗口才关闭。
+- `UDPIdleTimeout`（保持 300 秒）：仅用于 SOCKS5 UDP ASSOCIATE 的会话回收，避免 `sessions` 与上游 UDP socket 永久滞留。
+
+`cmd/gocks/main.go` 注册 `-timeout`（标准库同时接受 `--timeout`），`config.ParseArgsInfo` 增加超时参数并通过 `config.ValidateTimeout` 拒绝负值；启动日志打印生效值，`0` 显示为 `disabled`。
+
+**默认行为变更**：升级后通道不再在 5 分钟空闲后自动断开。需要旧行为请显式传入 `--timeout 5m`。
+
+`internal/tunnel/tunnel_test.go` 新增 `TestCopyHalf_IdleDisabled`；`internal/config/flag_test.go` 新增 `TestValidateTimeout`、`TestParseArgsInfoTimeout`。
+
 # 2026.10.14
 
 ## HTTP代理问题修复
