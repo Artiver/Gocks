@@ -14,6 +14,7 @@ http/socks5代理工具，支持上游代理，支持端口转发，请在授权
 - 单进程多监听规则（重复 `-L`），连续 `-L` 共享其后的 `-F` 组，每条规则可走不同上游链
 - `@参数文件`（如 `@rules.args`），便于保存和维护长命令行
 - 空闲超时可配置（`--timeout`，默认 `0` 表示不因空闲断开），SIGINT/SIGTERM 优雅退出
+- 日志异步写入（有界队列），终端输出阻塞不影响连接处理
 
 # 目录
 
@@ -24,6 +25,7 @@ Gocks/
 │   ├── config/                    # 配置定义与解析（config.go, parse.go, flag.go）
 │   ├── constant/                  # 协议/超时常量（protocol.go）
 │   ├── dialer/                    # 统一拨号入口（直连 + 链式上游，chain.go/http.go/socks5.go）
+│   ├── logging/                   # 非阻塞日志 sink（有界队列，终端挂起不阻塞业务）
 │   ├── netutil/                   # 网络小工具（可取消的 Sleep）
 │   ├── protocol/socks5/           # SOCKS5 编解码与客户端/服务端握手
 │   │                              #   codec/method/auth/addr/request/reply/udp/server/client

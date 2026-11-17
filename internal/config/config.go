@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"io"
 	"time"
 
 	"gocks/internal/constant"
@@ -49,6 +50,10 @@ type Rule struct {
 	// Timeout bounds how long a TCP tunnel may make no progress; zero disables
 	// the idle timeout.
 	Timeout time.Duration
+	// LogOutput receives this rule's log lines. A nil writer means os.Stderr.
+	// Startup injects a non-blocking sink so a stalled console cannot block
+	// the connection handlers.
+	LogOutput io.Writer
 }
 
 // Config is the runtime configuration derived from the command line.

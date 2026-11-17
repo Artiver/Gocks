@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"gocks/internal/config"
+	"gocks/internal/logging"
 	"gocks/internal/runner"
 	"log"
 	"os"
@@ -20,6 +21,14 @@ func main() {
 		idleTimeout time.Duration
 	)
 
+	// Logging must never wait on the console: cmd.exe suspends writes while
+	// the user has text selected, and a handler blocked there looks like a
+	// dead process.
+	sink := logging.New(os.Stderr, logging.DefaultQueueSize)
+	log.SetOutput(sink)
+	flag.CommandLine.SetOutput(sink)
+	defer sink.Close(logging.DefaultCloseTimeout)
+
 	flag.Var(ruleFlags.Listen(), "L", "Listen rule (repeatable; consecutive -L options share the following -F group; default :8181)")
 	flag.Var(ruleFlags.Upstream(), "F", "Upstream proxy address (repeatable, or a comma-separated list; nearest hop first)")
 	flag.DurationVar(&idleTimeout, "timeout", 0, "Tunnel idle timeout (e.g. 30s, 5m); 0 disables it")
@@ -28,7 +37,7 @@ func main() {
 	// library stops parsing options at the first non-option argument.
 	args, err := config.ExpandArgs(os.Args[1:])
 	if err != nil {
-		log.Fatalln(err)
+		fatal(sink, err)
 	}
 	flag.CommandLine.Parse(args)
 
@@ -36,7 +45,10 @@ func main() {
 
 	cfg, err := config.Load(&ruleFlags, idleTimeout)
 	if err != nil {
-		log.Fatalln(err)
+		fatal(sink, err)
+	}
+	for i := range cfg.Rules {
+		cfg.Rules[i].LogOutput = sink
 	}
 	logStartup(cfg)
 
@@ -45,9 +57,18 @@ func main() {
 	defer stop()
 
 	if err := runner.Run(ctx, cfg); err != nil {
-		log.Fatalln(err)
+		fatal(sink, err)
 	}
 	log.Println("shutdown complete")
+}
+
+// fatal reports err and exits. It never waits on the console: a stalled
+// terminal must not keep the process alive, so the sink is flushed with a
+// timeout and the remaining lines are dropped if it does not come back.
+func fatal(sink *logging.Sink, err error) {
+	log.Println(err)
+	sink.Close(logging.DefaultCloseTimeout)
+	os.Exit(1)
 }
 
 func logStartup(cfg config.Config) {

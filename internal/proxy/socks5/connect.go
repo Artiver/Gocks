@@ -29,12 +29,15 @@ func (p *Proxy) handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 	}(targetConn)
 
 	clientAddr := conn.RemoteAddr().String()
-	p.logger.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
 	// RFC 1928 §6: report the address the server used to reach the target.
 	if err := writeBndReply(conn, socks5proto.RepSucceeded, targetConn.LocalAddr()); err != nil {
 		return err
 	}
+
+	// Logged after the success reply so a stalled console cannot delay the
+	// client's handshake completion.
+	p.logger.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(p.timeout, targetConn, conn)

@@ -1,5 +1,23 @@
 # 2026.11.17
 
+## 日志非阻塞
+
+修复 cmd.exe 下偶发的「程序假死」：日志原本同步写 stderr，且位于握手关键路径；cmd 的快速编辑模式用鼠标选中窗口文本时会挂起控制台写入，所有新建连接卡在打日志上，Ctrl+C 又被控制台当作「复制」而不产生 SIGINT。
+
+- 新增 `internal/logging`：`Sink` 实现 `io.Writer`，日志先入有界队列（默认 1024 行，单行上限 8 KiB），由单个 goroutine 写入；队列满时丢弃并计数，输出恢复后追加一行 `[log] dropped N lines (console output stalled)`。`Write` 永不阻塞，也不返回错误。
+- `Sink.Close(timeout)` 最多等待 300ms 完成落盘，超时即丢弃剩余日志；`main` 的 `log.Fatalln` 改为 `fatal`（写日志 → 限时 Close → `os.Exit(1)`），保证终端挂起时进程仍能退出。
+- `config.Rule` 新增 `LogOutput io.Writer`（nil 回退 `os.Stderr`）；`main` 注入 sink 并 `log.SetOutput`，覆盖标准库全局 logger 与 `flag` 的 usage 输出。`Rule.Logger()` 签名不变。
+- SOCKS5 CONNECT 的连接建立日志改到成功应答之后；HTTP CONNECT 的连接日志改到 200 应答之后，避免日志 I/O 拖延客户端握手。
+
+**日志行为变更**：
+
+- HTTP 代理的非 CONNECT 请求不再单独输出连接建立日志，仅保留请求完成日志。
+- `udp://` 端口转发不再为每个请求-响应输出 `[UDP] a <-> b`，仅保留错误日志，高频 UDP 场景日志量显著下降。
+
+**新增内部 API**：`internal/logging`（`New`、`Sink.Write/Close/Dropped`）、`config.Rule.LogOutput`。
+
+**验证**：`internal/logging` 覆盖阻塞 writer 下 `Write` 不阻塞、队列满丢弃与汇总、顺序、`Close` 落盘与超时、关闭后写入、超长行截断、并发写入；`internal/config` 覆盖 `LogOutput` 注入与无标签前缀；`go build ./...`、`go vet ./...`、`go test -race ./...` 与 6 平台交叉编译通过。
+
 ## 单进程多监听规则
 
 - `-L` 支持重复出现：连续多个 `-L` 共享紧跟其后的 `-F` 组；`-F` 出现在第一个 `-L` 之前时作为默认上游链。

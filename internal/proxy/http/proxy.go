@@ -129,7 +129,6 @@ func (p *Proxy) dialTarget(conn net.Conn, req *http.Request, defaultPort string)
 		return nil, addr, err
 	}
 
-	p.logger.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
 	return upstream, addr, nil
 }
 
@@ -158,6 +157,10 @@ func (p *Proxy) handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.R
 	if _, err := io.WriteString(conn, connectedResponse); err != nil {
 		return true, err
 	}
+
+	// Logged after the 200 response so a stalled console cannot delay the
+	// client's CONNECT handshake.
+	p.logger.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
 
 	// Replay anything the client sent after CONNECT before tunnelling.
 	start := time.Now()

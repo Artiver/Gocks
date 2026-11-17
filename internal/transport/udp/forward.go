@@ -90,5 +90,4 @@ func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn, targ
 		return
 	}
 
-	logger.Printf("[UDP] %s <-> %s", clientAddr, forwardConn.RemoteAddr())
 }
