@@ -14,29 +14,31 @@ import (
 // udpReceiveTimeout bounds how long to wait for the upstream reply.
 const udpReceiveTimeout = 3 * time.Second
 
-// Run forwards UDP to the configured target until ctx is cancelled.
-func Run(ctx context.Context, cfg config.Config) error {
-	listen, err := net.ListenPacket("udp", cfg.Listen.Addr)
-	if err != nil {
-		return err
-	}
-	defer listen.Close()
+// ServePacket forwards UDP to rule's target on pc until ctx is cancelled.
+func ServePacket(ctx context.Context, rule config.Rule, pc net.PacketConn) error {
+	logger := rule.Logger()
 
+	done := make(chan struct{})
+	defer close(done)
+	defer pc.Close()
 	go func() {
-		<-ctx.Done()
-		listen.Close()
+		select {
+		case <-ctx.Done():
+			pc.Close()
+		case <-done:
+		}
 	}()
 
-	log.Println("UDP port listening", cfg.Listen.Addr)
+	logger.Println("UDP port listening", rule.Listen.Addr)
 
 	buffer := make([]byte, constant.UDPBufferSize)
 	for {
-		size, clientAddr, err := listen.ReadFrom(buffer)
+		size, clientAddr, err := pc.ReadFrom(buffer)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			log.Printf("Failed to read from client connection: %v", err)
+			logger.Printf("Failed to read from client connection: %v", err)
 			if !netutil.Sleep(ctx, constant.AcceptBackoff) {
 				return nil
 			}
@@ -47,25 +49,25 @@ func Run(ctx context.Context, cfg config.Config) error {
 		// before it is handed to its own goroutine.
 		payload := make([]byte, size)
 		copy(payload, buffer[:size])
-		go handleRequest(payload, clientAddr, listen, cfg.Listen.Target)
+		go handleRequest(payload, clientAddr, pc, rule.Listen.Target, logger)
 	}
 }
 
-func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn, target string) {
+func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn, target string, logger *log.Logger) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			logger.Println(err)
 		}
 	}()
 	forwardConn, err := net.Dial("udp", target)
 	if err != nil {
-		log.Printf("Failed to forward to %s: %v", target, err)
+		logger.Printf("Failed to forward to %s: %v", target, err)
 		return
 	}
 	defer forwardConn.Close()
 
 	if _, err := forwardConn.Write(data); err != nil {
-		log.Printf("Failed to write to forward connection: %v", err)
+		logger.Printf("Failed to write to forward connection: %v", err)
 		return
 	}
 
@@ -78,15 +80,15 @@ func handleRequest(data []byte, clientAddr net.Addr, listen net.PacketConn, targ
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && !netErr.Timeout() {
-			log.Printf("Failed to read from forward connection: %v", err)
+			logger.Printf("Failed to read from forward connection: %v", err)
 		}
 		return
 	}
 
 	if _, err := listen.WriteTo(responseBuffer[:n], clientAddr); err != nil {
-		log.Printf("Failed to write to client connection: %v", err)
+		logger.Printf("Failed to write to client connection: %v", err)
 		return
 	}
 
-	log.Printf("[UDP] %s <-> %s", clientAddr, forwardConn.RemoteAddr())
+	logger.Printf("[UDP] %s <-> %s", clientAddr, forwardConn.RemoteAddr())
 }

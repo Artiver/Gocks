@@ -3,7 +3,6 @@ package socks5
 import (
 	"context"
 	socks5proto "gocks/internal/protocol/socks5"
-	"log"
 	"net"
 )
 
@@ -59,10 +58,10 @@ func (p *Proxy) handleUDPAssociate(conn net.Conn) error {
 		clientIP = remote.IP
 	}
 	if upstreamConn != nil {
-		log.Printf("[SOCKS5] [UDP] %s relay on %s via upstream %s",
+		p.logger.Printf("[SOCKS5] [UDP] %s relay on %s via upstream %s",
 			conn.RemoteAddr(), bound, upstreamConn.RemoteAddr())
 	} else {
-		log.Printf("[SOCKS5] [UDP] %s relay on %s", conn.RemoteAddr(), bound)
+		p.logger.Printf("[SOCKS5] [UDP] %s relay on %s", conn.RemoteAddr(), bound)
 	}
 
 	// The association lives as long as the TCP control connection.
@@ -88,6 +87,7 @@ func (p *Proxy) handleUDPAssociate(conn net.Conn) error {
 		clientIP:     clientIP,
 		upstreamConn: upstreamConn,
 		sessions:     make(map[string]*udpSession),
+		logger:       p.logger,
 	}
 	r.run(ctx)
 	return nil

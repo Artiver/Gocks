@@ -38,6 +38,7 @@ type udpRelay struct {
 	mu         sync.Mutex
 	clientAddr *net.UDPAddr
 	sessions   map[string]*udpSession
+	logger     *log.Logger
 }
 
 func (r *udpRelay) run(ctx context.Context) {
@@ -69,7 +70,7 @@ func (r *udpRelay) runDirect(ctx context.Context) {
 
 		target, err := net.ResolveUDPAddr("udp", packet.dgram.Header.Addr.String())
 		if err != nil {
-			log.Printf("[SOCKS5] [UDP] resolve %s: %v", packet.dgram.Header.Addr, err)
+			r.logger.Printf("[SOCKS5] [UDP] resolve %s: %v", packet.dgram.Header.Addr, err)
 			continue
 		}
 
@@ -78,7 +79,7 @@ func (r *udpRelay) runDirect(ctx context.Context) {
 			continue
 		}
 		if _, err := session.conn.Write(packet.dgram.Data); err != nil {
-			log.Printf("[SOCKS5] [UDP] forward to %s: %v", target, err)
+			r.logger.Printf("[SOCKS5] [UDP] forward to %s: %v", target, err)
 		}
 	}
 }
@@ -163,7 +164,7 @@ func (r *udpRelay) readClient(buf []byte) (*clientPacket, error) {
 
 	dgram := &socks5proto.UDPDatagram{}
 	if err := dgram.Unmarshal(buf[:n]); err != nil {
-		log.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
+		r.logger.Printf("[SOCKS5] [UDP] malformed datagram from %s: %v", src, err)
 		return nil, nil
 	}
 	if dgram.Header.Frag != 0 {
@@ -186,7 +187,7 @@ func (r *udpRelay) session(client, target *net.UDPAddr) *udpSession {
 
 	conn, err := net.DialUDP("udp", nil, target)
 	if err != nil {
-		log.Printf("[SOCKS5] [UDP] dial %s: %v", target, err)
+		r.logger.Printf("[SOCKS5] [UDP] dial %s: %v", target, err)
 		return nil
 	}
 

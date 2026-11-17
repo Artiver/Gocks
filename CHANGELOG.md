@@ -1,3 +1,24 @@
+# 2026.11.17
+
+## 单进程多监听规则
+
+- `-L` 支持重复出现：连续多个 `-L` 共享紧跟其后的 `-F` 组；`-F` 出现在第一个 `-L` 之前时作为默认上游链。
+- 新增 `@file` 参数文件（`config.ExpandArgs`），在 `flag.Parse` 前展开；支持 `#` 注释、单/双引号与行尾 `\` 续行，暂不支持嵌套引用。
+- 新增 `internal/runner`：按 scheme 预绑定全部监听器（TCP/HTTP/SOCKS5/MIX 用 `net.Listen`，UDP 用 `net.ListenPacket`），全部成功后才开始服务；任一失败回滚已绑定端口；完全相同的监听地址在绑定前报错。
+- 启动与运行日志增加 `[rule i/n]` 前缀；各代理/转发入口使用该规则独立的 `log.Logger`。
+- `config.Config` 由 `Listen` + `Upstream` 改为 `Rules []Rule` + `Timeout`；新增 `config.Rule{Label, Listen, Upstream, Timeout}`，删除 `config.Config.Listen` / `config.Config.Upstream`（内部 API 破坏性变更）。
+- 各入口由 `Run(ctx, cfg)` 改为 `Serve(ctx, rule, ln net.Listener)`；UDP 入口改为 `ServePacket(ctx, rule, pc net.PacketConn)`；`New(cfg)` 改为 `New(rule)`。
+- `config.Load` 签名改为 `Load(*config.Flags, time.Duration)`；`config.UpstreamList` 由 `config.Flags` 取代。
+- 新增启动期校验：`tcp://` / `udp://` 缺少 `/target`；`http://` / `socks5://` / `mix://` 带 `/target`；`udp://` 规则配置 `-F`；未知监听 scheme；规则数超过 `MaxRules`（64）。
+
+**行为变更**：
+
+- 重复 `-L` 从「最后一个生效」变为「每条规则独立监听」。
+- `udp://` + `-F` 从「静默忽略」变为启动报错。
+- 缺失或多余 `/target` 的配置从「运行时才失败」变为启动报错。
+
+**验证**：`internal/config` 覆盖分段、兼容写法、默认链、错误与 `@file`；`internal/runner` 覆盖预绑定回滚、地址冲突、取消退出；本地端到端验证 4 条规则（2 条 TCP 经上游、1 条 SOCKS5 经上游、1 条 SOCKS5 直连）、`@file`、`udp` + `-F` 报错、端口冲突快速失败；`go build ./...`、`go vet ./...`、`gofmt -l`、`go test ./...` 通过。
+
 # 2026.11.11
 
 ## 内部结构：配置注入与命名规范化

@@ -9,6 +9,7 @@ const TCP = "tcp"
 const UDP = "udp"
 const HTTP = "http"
 const Socks5 = "socks5"
+const Mix = "mix"
 
 const ConnectMethod = "CONNECT"
 

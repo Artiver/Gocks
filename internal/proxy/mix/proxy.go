@@ -17,12 +17,13 @@ import (
 // and SOCKS5 apart.
 const defaultReadBytes = 512
 
-// Run serves the HTTP+SOCKS5 mixed proxy until ctx is cancelled.
-func Run(ctx context.Context, cfg config.Config) error {
-	httpProxy := http.New(cfg)
-	socks5Proxy := socks5.New(cfg)
-	return server.Serve(ctx, "HTTP+SOCKS5 proxy", cfg.Listen.Addr, func(conn net.Conn) {
-		chooseProxy(conn, httpProxy, socks5Proxy)
+// Serve serves the HTTP+SOCKS5 mixed proxy on ln until ctx is cancelled.
+func Serve(ctx context.Context, rule config.Rule, ln net.Listener) error {
+	httpProxy := http.New(rule)
+	socks5Proxy := socks5.New(rule)
+	logger := rule.Logger()
+	return server.ServeListener(ctx, rule.LogPrefix("HTTP+SOCKS5 proxy"), ln, func(conn net.Conn) {
+		chooseProxy(conn, httpProxy, socks5Proxy, logger)
 	})
 }
 
@@ -30,21 +31,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 // client always opens with its version byte, anything else is treated as HTTP.
 // The pre-read bytes are handed to the chosen handler so its parser sees the
 // complete opening message.
-func chooseProxy(conn net.Conn, httpProxy *http.Proxy, socks5Proxy *socks5.Proxy) {
+func chooseProxy(conn net.Conn, httpProxy *http.Proxy, socks5Proxy *socks5.Proxy, logger *log.Logger) {
 	buff := make([]byte, defaultReadBytes)
 	if err := conn.SetReadDeadline(time.Now().Add(constant.HandshakeTimeout)); err != nil {
-		log.Printf("set read deadline error: %v", err)
+		logger.Printf("set read deadline error: %v", err)
 		conn.Close()
 		return
 	}
 	n, err := conn.Read(buff)
 	if err != nil || n < 1 {
-		log.Printf("Error reading from connection: %v", err)
+		logger.Printf("Error reading from connection: %v", err)
 		conn.Close()
 		return
 	}
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
-		log.Printf("reset read deadline error: %v", err)
+		logger.Printf("reset read deadline error: %v", err)
 		conn.Close()
 		return
 	}

@@ -51,7 +51,7 @@ func startSocks5Server(t *testing.T, p *Proxy) string {
 }
 
 func TestHandleSocks5Connect(t *testing.T) {
-	p := New(config.Config{})
+	p := New(config.Rule{})
 	target := startEchoServer(t)
 	proxyAddr := startSocks5Server(t, p)
 
@@ -103,7 +103,7 @@ func TestHandleSocks5Connect(t *testing.T) {
 }
 
 func TestHandleSocks5RejectsNoAuthWhenCredentialsConfigured(t *testing.T) {
-	p := New(config.Config{Listen: config.Endpoint{
+	p := New(config.Rule{Listen: config.Endpoint{
 		Auth: &config.Auth{Username: "user", Password: "pass"},
 	}})
 	proxyAddr := startSocks5Server(t, p)

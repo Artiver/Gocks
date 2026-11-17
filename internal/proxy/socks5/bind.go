@@ -6,7 +6,6 @@ import (
 	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
-	"log"
 	"net"
 	"time"
 )
@@ -35,7 +34,7 @@ func (p *Proxy) handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 	}
 
 	clientAddr := conn.RemoteAddr().String()
-	log.Printf("[SOCKS5] [BIND] %s listening on %s", clientAddr, listener.Addr())
+	p.logger.Printf("[SOCKS5] [BIND] %s listening on %s", clientAddr, listener.Addr())
 
 	// Watch the control connection for an early client disconnect while the
 	// peer is awaited. Peek never consumes, so any buffered data is relayed.
@@ -83,11 +82,11 @@ func (p *Proxy) handleBind(conn net.Conn, addr *socks5proto.Addr) error {
 		return err
 	}
 
-	log.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetConn.RemoteAddr())
+	p.logger.Printf("[SOCKS5] [BIND] %s <--> %s", clientAddr, targetConn.RemoteAddr())
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(p.timeout, targetConn, tunnel.NewReaderConn(br, conn))
-	log.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%s sent, %s received)",
+	p.logger.Printf("[SOCKS5] [BIND] %s <-> %s closed after %s (%s sent, %s received)",
 		clientAddr, targetConn.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err
 }

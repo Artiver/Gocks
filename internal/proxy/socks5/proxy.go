@@ -20,21 +20,23 @@ type Proxy struct {
 	dialer  *dialer.Dialer
 	auth    *config.Auth
 	timeout time.Duration
+	logger  *log.Logger
 }
 
-// New returns a SOCKS5 proxy configured by cfg.
-func New(cfg config.Config) *Proxy {
+// New returns a SOCKS5 proxy configured by rule.
+func New(rule config.Rule) *Proxy {
 	return &Proxy{
-		dialer:  dialer.New(cfg.Upstream),
-		auth:    cfg.Listen.Auth,
-		timeout: cfg.Timeout,
+		dialer:  dialer.New(rule.Upstream),
+		auth:    rule.Listen.Auth,
+		timeout: rule.Timeout,
+		logger:  rule.Logger(),
 	}
 }
 
-// Run serves SOCKS5 until ctx is cancelled.
-func Run(ctx context.Context, cfg config.Config) error {
-	p := New(cfg)
-	return server.Serve(ctx, "SOCKS5 proxy", cfg.Listen.Addr, func(conn net.Conn) {
+// Serve serves SOCKS5 on ln until ctx is cancelled.
+func Serve(ctx context.Context, rule config.Rule, ln net.Listener) error {
+	p := New(rule)
+	return server.ServeListener(ctx, rule.LogPrefix("SOCKS5 proxy"), ln, func(conn net.Conn) {
 		p.HandleConnection(conn, nil)
 	})
 }
@@ -45,7 +47,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			p.logger.Println(err)
 		}
 	}()
 
@@ -54,21 +56,21 @@ func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			log.Println("connection close error", err)
+			p.logger.Println("connection close error", err)
 		}
 	}()
 
 	clientID, err := p.handshake(conn)
 	if err != nil {
-		log.Println("Handshake error:", err)
+		p.logger.Println("Handshake error:", err)
 		return
 	}
 	if clientID != "" {
-		log.Printf("[SOCKS5] client %q from %s", clientID, conn.RemoteAddr())
+		p.logger.Printf("[SOCKS5] client %q from %s", clientID, conn.RemoteAddr())
 	}
 
 	if err := p.handleRequest(conn); err != nil {
-		log.Println("Request handling error:", err)
+		p.logger.Println("Request handling error:", err)
 	}
 }
 
@@ -103,7 +105,7 @@ func (p *Proxy) handleRequest(conn net.Conn) error {
 	if err != nil {
 		if errors.Is(err, socks5proto.ErrBadAddrType) {
 			if werr := writeReply(conn, socks5proto.RepAddrUnsupported, nil); werr != nil {
-				log.Println("write reply error:", werr)
+				p.logger.Println("write reply error:", werr)
 			}
 		}
 		return err
@@ -122,7 +124,7 @@ func (p *Proxy) handleRequest(conn net.Conn) error {
 		return p.handleUDPAssociate(conn)
 	default:
 		if werr := writeReply(conn, socks5proto.RepCmdUnsupported, nil); werr != nil {
-			log.Println("write reply error:", werr)
+			p.logger.Println("write reply error:", werr)
 		}
 		return fmt.Errorf("unsupported command %d", req.Cmd)
 	}

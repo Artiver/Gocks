@@ -23,8 +23,8 @@ func (a *Auth) ProxyAuthorization() string {
 	return constant.BasicAuthPrefix + base64.StdEncoding.EncodeToString([]byte(a.Username+":"+a.Password))
 }
 
-// Endpoint describes one endpoint: the local listener (Config.Listen) or a
-// single upstream hop (Config.Upstream).
+// Endpoint describes one endpoint: the local listener of a rule or a single
+// upstream hop.
 type Endpoint struct {
 	Scheme string
 	Addr   string
@@ -35,8 +35,11 @@ type Endpoint struct {
 	Auth *Auth
 }
 
-// Config is the runtime configuration derived from the command line.
-type Config struct {
+// Rule is one independent listening rule: a local listener and the upstream
+// chain that every connection it serves traverses.
+type Rule struct {
+	// Label identifies the rule in logs, e.g. "1/5".
+	Label string
 	// Listen is the local endpoint to serve.
 	Listen Endpoint
 	// Upstream is the ordered list of upstream proxies a dial traverses: the
@@ -48,6 +51,17 @@ type Config struct {
 	Timeout time.Duration
 }
 
+// Config is the runtime configuration derived from the command line.
+type Config struct {
+	// Rules is the ordered list of listeners to serve, one goroutine each.
+	Rules []Rule
+	// Timeout is the process-wide idle timeout, copied into every rule.
+	Timeout time.Duration
+}
+
 // MaxUpstreamHops bounds the chain so a misconfigured command line cannot
 // build an unbounded proxy chain.
 const MaxUpstreamHops = 32
+
+// MaxRules bounds how many listeners one process may serve.
+const MaxRules = 64

@@ -23,21 +23,23 @@ type Proxy struct {
 	dialer  *dialer.Dialer
 	auth    *config.Auth
 	timeout time.Duration
+	logger  *log.Logger
 }
 
-// New returns an HTTP proxy configured by cfg.
-func New(cfg config.Config) *Proxy {
+// New returns an HTTP proxy configured by rule.
+func New(rule config.Rule) *Proxy {
 	return &Proxy{
-		dialer:  dialer.New(cfg.Upstream),
-		auth:    cfg.Listen.Auth,
-		timeout: cfg.Timeout,
+		dialer:  dialer.New(rule.Upstream),
+		auth:    rule.Listen.Auth,
+		timeout: rule.Timeout,
+		logger:  rule.Logger(),
 	}
 }
 
-// Run serves HTTP proxying until ctx is cancelled.
-func Run(ctx context.Context, cfg config.Config) error {
-	p := New(cfg)
-	return server.Serve(ctx, "HTTP proxy", cfg.Listen.Addr, func(conn net.Conn) {
+// Serve serves HTTP proxying on ln until ctx is cancelled.
+func Serve(ctx context.Context, rule config.Rule, ln net.Listener) error {
+	p := New(rule)
+	return server.ServeListener(ctx, rule.LogPrefix("HTTP proxy"), ln, func(conn net.Conn) {
 		p.HandleConnection(conn, nil)
 	})
 }
@@ -48,12 +50,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			p.logger.Println(err)
 		}
 	}()
 	defer func() {
 		if err := conn.Close(); err != nil {
-			log.Println("connection close error", err)
+			p.logger.Println("connection close error", err)
 		}
 	}()
 
@@ -67,7 +69,7 @@ func (p *Proxy) HandleConnection(conn net.Conn, firstBuff []byte) {
 		shouldClose, err := p.handleOneRequest(br, conn)
 		if err != nil {
 			if !isClientGone(err) {
-				log.Println("[HTTP]", err)
+				p.logger.Println("[HTTP]", err)
 			}
 			return
 		}
@@ -100,9 +102,9 @@ func (p *Proxy) handleOneRequest(br *bufio.Reader, conn net.Conn) (bool, error) 
 		return true, err
 	}
 
-	if p.auth != nil && !checkAuthHeader(p.auth, req.Header.Get(constant.BasicAuthHeader)) {
+	if p.auth != nil && !checkAuthHeader(p.auth, req.Header.Get(constant.BasicAuthHeader), p.logger) {
 		if _, err := io.WriteString(conn, authRequiredResponse); err != nil {
-			log.Println("send 407 error:", err)
+			p.logger.Println("send 407 error:", err)
 		}
 		return true, nil
 	}
@@ -120,14 +122,14 @@ func (p *Proxy) dialTarget(conn net.Conn, req *http.Request, defaultPort string)
 
 	upstream, err := p.dialer.DialTCP(addr)
 	if err != nil {
-		log.Println(err)
+		p.logger.Println(err)
 		if _, werr := io.WriteString(conn, badGatewayResponse); werr != nil {
-			log.Println("send 502 error:", werr)
+			p.logger.Println("send 502 error:", werr)
 		}
 		return nil, addr, err
 	}
 
-	log.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
+	p.logger.Printf("[HTTP] %s <--> %s", conn.RemoteAddr(), addr)
 	return upstream, addr, nil
 }
 
@@ -160,10 +162,10 @@ func (p *Proxy) handleConnectMethod(conn net.Conn, br *bufio.Reader, req *http.R
 	// Replay anything the client sent after CONNECT before tunnelling.
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(p.timeout, upstream, tunnel.NewReaderConn(br, conn))
-	log.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
+	p.logger.Printf("[HTTP] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
 		conn.RemoteAddr(), addr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
-		log.Println("[HTTP]", err)
+		p.logger.Println("[HTTP]", err)
 	}
 	return true, nil
 }
@@ -202,7 +204,7 @@ func (p *Proxy) handleProxyMethod(conn net.Conn, req *http.Request) (bool, error
 	shouldClose := finishResponse(req, resp)
 	respOut := &countingWriter{w: conn}
 	err = resp.Write(respOut)
-	log.Printf("[HTTP] [PROXY] %s <-> %s %s in %s (%s sent, %s received)",
+	p.logger.Printf("[HTTP] [PROXY] %s <-> %s %s in %s (%s sent, %s received)",
 		conn.RemoteAddr(), addr, req.URL, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(reqOut.n), netutil.FormatBytes(respOut.n))
 	if err != nil {
 		return true, err

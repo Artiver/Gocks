@@ -5,7 +5,6 @@ import (
 	"gocks/internal/netutil"
 	socks5proto "gocks/internal/protocol/socks5"
 	"gocks/internal/tunnel"
-	"log"
 	"net"
 	"strings"
 	"syscall"
@@ -25,12 +24,12 @@ func (p *Proxy) handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 	defer func(targetConn net.Conn) {
 		err = targetConn.Close()
 		if err != nil {
-			log.Println("target connection close error", err)
+			p.logger.Println("target connection close error", err)
 		}
 	}(targetConn)
 
 	clientAddr := conn.RemoteAddr().String()
-	log.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
+	p.logger.Printf("[SOCKS5] [CONNECT] %s <--> %s", clientAddr, targetAddr)
 
 	// RFC 1928 §6: report the address the server used to reach the target.
 	if err := writeBndReply(conn, socks5proto.RepSucceeded, targetConn.LocalAddr()); err != nil {
@@ -39,7 +38,7 @@ func (p *Proxy) handleConnect(conn net.Conn, addr *socks5proto.Addr) error {
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(p.timeout, targetConn, conn)
-	log.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
+	p.logger.Printf("[SOCKS5] [CONNECT] %s <-> %s closed after %s (%s sent, %s received)",
 		clientAddr, targetAddr, time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	return err
 }

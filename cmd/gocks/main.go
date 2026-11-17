@@ -5,12 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"gocks/internal/config"
-	"gocks/internal/constant"
-	"gocks/internal/proxy/http"
-	"gocks/internal/proxy/mix"
-	"gocks/internal/proxy/socks5"
-	"gocks/internal/transport/tcp"
-	"gocks/internal/transport/udp"
+	"gocks/internal/runner"
 	"log"
 	"os"
 	"os/signal"
@@ -19,21 +14,27 @@ import (
 	"time"
 )
 
-var (
-	proxyAddr     string
-	upstreamAddrs config.UpstreamList
-	idleTimeout   time.Duration
-)
-
 func main() {
-	flag.StringVar(&proxyAddr, "L", ":8181", "Listen address (scheme://[user:pass@]host[:port][/target])")
-	flag.Var(&upstreamAddrs, "F", "Upstream proxy address (repeatable, or a comma-separated list; nearest hop first)")
+	var (
+		ruleFlags   config.Flags
+		idleTimeout time.Duration
+	)
+
+	flag.Var(ruleFlags.Listen(), "L", "Listen rule (repeatable; consecutive -L options share the following -F group; default :8181)")
+	flag.Var(ruleFlags.Upstream(), "F", "Upstream proxy address (repeatable, or a comma-separated list; nearest hop first)")
 	flag.DurationVar(&idleTimeout, "timeout", 0, "Tunnel idle timeout (e.g. 30s, 5m); 0 disables it")
-	flag.Parse()
 
-	log.SetFlags(log.Ldate | log.Lmicroseconds)
+	// @file arguments must be expanded before flag parsing: the standard
+	// library stops parsing options at the first non-option argument.
+	args, err := config.ExpandArgs(os.Args[1:])
+	if err != nil {
+		log.Fatalln(err)
+	}
+	flag.CommandLine.Parse(args)
 
-	cfg, err := config.Load(proxyAddr, upstreamAddrs, idleTimeout)
+	log.SetFlags(config.LogFlags)
+
+	cfg, err := config.Load(&ruleFlags, idleTimeout)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -43,42 +44,36 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	switch cfg.Listen.Scheme {
-	case constant.Socks5:
-		err = socks5.Run(ctx, cfg)
-	case constant.HTTP:
-		err = http.Run(ctx, cfg)
-	case constant.TCP:
-		err = tcp.Run(ctx, cfg)
-	case constant.UDP:
-		err = udp.Run(ctx, cfg)
-	default:
-		err = mix.Run(ctx, cfg)
-	}
-	if err != nil {
+	if err := runner.Run(ctx, cfg); err != nil {
 		log.Fatalln(err)
 	}
 	log.Println("shutdown complete")
 }
 
 func logStartup(cfg config.Config) {
-	logForwardChain(cfg.Upstream)
+	for _, rule := range cfg.Rules {
+		log.Printf("[rule %s] %s://%s", rule.Label, rule.Listen.Scheme, rule.Listen.Addr)
+		if rule.Listen.Target != "" {
+			log.Printf("[rule %s] forward target: %s", rule.Label, rule.Listen.Target)
+		}
+		logForwardChain(rule)
+	}
 	logIdleTimeout(cfg.Timeout)
 }
 
 // logForwardChain prints the hop order once at startup, because "nearest hop
 // first" is easy to get backwards on the command line. Credentials are never
 // logged.
-func logForwardChain(upstream []config.Endpoint) {
-	if len(upstream) == 0 {
+func logForwardChain(rule config.Rule) {
+	if len(rule.Upstream) == 0 {
 		return
 	}
 
-	hops := make([]string, 0, len(upstream))
-	for i, hop := range upstream {
+	hops := make([]string, 0, len(rule.Upstream))
+	for i, hop := range rule.Upstream {
 		hops = append(hops, fmt.Sprintf("[%d] %s://%s", i, hop.Scheme, hop.Addr))
 	}
-	log.Printf("forward chain: %s -> target", strings.Join(hops, " -> "))
+	log.Printf("[rule %s] forward chain: %s -> target", rule.Label, strings.Join(hops, " -> "))
 }
 
 // logIdleTimeout prints the effective tunnel idle timeout so the running

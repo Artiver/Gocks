@@ -12,18 +12,19 @@ import (
 	"time"
 )
 
-// Run forwards TCP to the configured target until ctx is cancelled.
-func Run(ctx context.Context, cfg config.Config) error {
-	d := dialer.New(cfg.Upstream)
-	return server.Serve(ctx, "TCP port", cfg.Listen.Addr, func(conn net.Conn) {
-		handleConnection(conn, d, cfg.Listen.Target, cfg.Timeout)
+// Serve forwards TCP to rule's target on ln until ctx is cancelled.
+func Serve(ctx context.Context, rule config.Rule, ln net.Listener) error {
+	d := dialer.New(rule.Upstream)
+	logger := rule.Logger()
+	return server.ServeListener(ctx, rule.LogPrefix("TCP port"), ln, func(conn net.Conn) {
+		handleConnection(conn, d, rule.Listen.Target, rule.Timeout, logger)
 	})
 }
 
-func handleConnection(src net.Conn, d *dialer.Dialer, target string, timeout time.Duration) {
+func handleConnection(src net.Conn, d *dialer.Dialer, target string, timeout time.Duration, logger *log.Logger) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			logger.Println(err)
 		}
 	}()
 	defer src.Close()
@@ -32,18 +33,18 @@ func handleConnection(src net.Conn, d *dialer.Dialer, target string, timeout tim
 	// so -F applies to port forwarding as well.
 	dst, err := d.DialTCP(target)
 	if err != nil {
-		log.Printf("dial tcp %s: %v", target, err)
+		logger.Printf("dial tcp %s: %v", target, err)
 		return
 	}
 	defer dst.Close()
 
-	log.Printf("[TCP] %s <-> %s", src.RemoteAddr(), dst.RemoteAddr())
+	logger.Printf("[TCP] %s <-> %s", src.RemoteAddr(), dst.RemoteAddr())
 
 	start := time.Now()
 	stats, err := tunnel.TransportDataStats(timeout, src, dst)
-	log.Printf("[TCP] %s <-> %s closed after %s (%s sent, %s received)",
+	logger.Printf("[TCP] %s <-> %s closed after %s (%s sent, %s received)",
 		src.RemoteAddr(), dst.RemoteAddr(), time.Since(start).Round(time.Millisecond), netutil.FormatBytes(stats.SourceToTarget), netutil.FormatBytes(stats.TargetToSource))
 	if err != nil {
-		log.Println("transport data error", err)
+		logger.Println("transport data error", err)
 	}
 }

@@ -12,14 +12,14 @@ import (
 // checkAuthHeader verifies one Proxy-Authorization header value against auth.
 // Both fields are compared in constant time so the response cannot be used as
 // a timing oracle.
-func checkAuthHeader(auth *config.Auth, authHeader string) bool {
+func checkAuthHeader(auth *config.Auth, authHeader string, logger *log.Logger) bool {
 	if auth == nil || !strings.HasPrefix(authHeader, constant.BasicAuthPrefix) {
 		return false
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, constant.BasicAuthPrefix))
 	if err != nil {
-		log.Println("failed to decode Proxy-Authorization header:", err)
+		logger.Println("failed to decode Proxy-Authorization header:", err)
 		return false
 	}
 
