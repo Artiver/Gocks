@@ -71,6 +71,47 @@ Gocks_windows_amd64.exe -L tcp://:8181/10.0.0.5:3389 --timeout 30s
 
 作用范围为 HTTP CONNECT、SOCKS5 CONNECT/BIND、TCP 端口转发；SOCKS5 UDP ASSOCIATE 仍使用独立的 300 秒会话回收超时，不受该选项影响。负值会在启动时报错。
 
+## 端口转发
+
+```shell
+# TCP端口转发，监听192.168.100.1:8181，将数据包转发到192.168.134.1:8080
+Gocks_windows_amd64.exe -L tcp://192.168.100.1:8181/192.168.134.1:8080
+
+# UDP端口转发，监听192.168.100.1:8181，将数据包转发到192.168.134.1:8080
+Gocks_windows_amd64.exe -L udp://192.168.100.1:8181/192.168.134.1:8080
+
+# TCP端口转发也可以经过上游代理链（与代理模式一致）
+Gocks_windows_amd64.exe -L tcp://:8181/10.0.0.5:3389 -F socks5://192.168.200.1:1080
+```
+
+UDP 端口转发为直连转发（每次请求新建一个上游 socket，等待响应 3 秒），不支持 `-F`；给 `udp://` 规则配置 `-F` 会在启动时报错，避免误以为已走上游。
+
+## 代理转发
+
+```shell
+# 全零监听，端口8181，socks5+http代理，不认证
+Gocks_windows_amd64.exe
+Gocks_windows_amd64.exe -L :8181
+
+# 绑定IP端口，socks5+http代理，不认证
+Gocks_windows_amd64.exe -L 192.168.100.1:8080
+
+# 绑定IP端口，socks5+http代理，认证
+Gocks_windows_amd64.exe -L mix://username:password@192.168.100.1:8080
+
+# 开启Socks5代理，并将其转发给上游http代理
+Gocks_windows_amd64.exe -L socks5://:8080 -F http://192.168.200.1:8080
+
+# 开启HTTP代理，并将其转发给上游需认证的socks5代理
+Gocks_windows_amd64.exe -L http://:8080 -F socks5://admin:admin@192.168.200.1:8080
+
+# 开启socks5+http代理，并将按顺序依次转发给上游的P1代理、P2代理、P3代理，跳数上限为 32
+Gocks_windows_amd64.exe -L :8080 -F socks5://user1:pass1@P1:1080 -F http://user2:pass2@P2:8080 -F socks5://P3:1080
+Gocks_windows_amd64.exe -L :8080 -F "socks5://user1:pass1@P1:1080,http://user2:pass2@P2:8080,socks5://P3:1080"
+```
+
+代理协议、上游协议、是否认证均可自由搭配使用。
+
 ## 批量监听规则
 
 `-L` 可以重复出现。**连续写在一起的多个 `-L` 共享紧跟其后的 `-F` 组**；一旦某段规则已经带上 `-F`，再出现 `-L` 就开始新的一段。没有 `-F` 的段表示直连。
@@ -130,47 +171,6 @@ Gocks_windows_amd64.exe @rules.args
 ```
 
 支持单/双引号包裹含空格的参数（如 `-F "socks5://a:1, http://b:2"`）；暂不支持文件内再引用 `@file`。
-
-## 端口转发
-
-```shell
-# TCP端口转发，监听192.168.100.1:8181，将数据包转发到192.168.134.1:8080
-Gocks_windows_amd64.exe -L tcp://192.168.100.1:8181/192.168.134.1:8080
-
-# UDP端口转发，监听192.168.100.1:8181，将数据包转发到192.168.134.1:8080
-Gocks_windows_amd64.exe -L udp://192.168.100.1:8181/192.168.134.1:8080
-
-# TCP端口转发也可以经过上游代理链（与代理模式一致）
-Gocks_windows_amd64.exe -L tcp://:8181/10.0.0.5:3389 -F socks5://192.168.200.1:1080
-```
-
-UDP 端口转发为直连转发（每次请求新建一个上游 socket，等待响应 3 秒），不支持 `-F`；给 `udp://` 规则配置 `-F` 会在启动时报错，避免误以为已走上游。
-
-## 代理转发
-
-```shell
-# 全零监听，端口8181，socks5+http代理，不认证
-Gocks_windows_amd64.exe
-Gocks_windows_amd64.exe -L :8181
-
-# 绑定IP端口，socks5+http代理，不认证
-Gocks_windows_amd64.exe -L 192.168.100.1:8080
-
-# 绑定IP端口，socks5+http代理，认证
-Gocks_windows_amd64.exe -L mix://username:password@192.168.100.1:8080
-
-# 开启Socks5代理，并将其转发给上游http代理
-Gocks_windows_amd64.exe -L socks5://:8080 -F http://192.168.200.1:8080
-
-# 开启HTTP代理，并将其转发给上游需认证的socks5代理
-Gocks_windows_amd64.exe -L http://:8080 -F socks5://admin:admin@192.168.200.1:8080
-
-# 开启socks5+http代理，并将按顺序依次转发给上游的P1代理、P2代理、P3代理，跳数上限为 32
-Gocks_windows_amd64.exe -L :8080 -F socks5://user1:pass1@P1:1080 -F http://user2:pass2@P2:8080 -F socks5://P3:1080
-Gocks_windows_amd64.exe -L :8080 -F "socks5://user1:pass1@P1:1080,http://user2:pass2@P2:8080,socks5://P3:1080"
-```
-
-代理协议、上游协议、是否认证均可自由搭配使用。
 
 # 参考
 
