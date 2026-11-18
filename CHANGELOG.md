@@ -1,3 +1,16 @@
+# 2026.11.18
+
+## 启动日志改为链路图
+
+- 每条规则只打印一行数据流：`listen <scheme>://<addr> -> [n] <scheme>://<addr> -> target ...`。箭头方向即数据方向，原本单独一行的 `forward chain` 被合并，`[0]` 起始序号换成从 1 开始的 `[n]`，与 `-F` 顺序一致。
+- 代理规则（`http`/`socks5`/`mix`）链尾显示 `target (from request)`；端口转发（`tcp`/`udp`）显示固定目标，如 `target internal:443`。
+- 配了凭据的监听端或上游跳标注 `(auth)`，仍不打印用户名与密码。
+- 新增 `routeString` / `endpointString`（`cmd/gocks`）。
+
+**日志行为变更**：原先的 `[rule i/n] <scheme>://<addr>`、`forward target: ...`、`forward chain: ...` 三行合并为一行。
+
+**验证**：`cmd/gocks` 覆盖各 scheme 的无链/有链/固定目标/认证标记与凭据不泄露；本地实跑 3 条规则（SOCKS5 经带认证的上游、TCP 转发、UDP 转发）输出符合预期；`go build ./...`、`go vet ./...`、`gofmt -l`、`go test ./...` 通过。
+
 # 2026.11.17
 
 ## 日志非阻塞

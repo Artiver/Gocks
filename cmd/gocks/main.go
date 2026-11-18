@@ -73,28 +73,39 @@ func fatal(sink *logging.Sink, err error) {
 
 func logStartup(cfg config.Config) {
 	for _, rule := range cfg.Rules {
-		log.Printf("[rule %s] %s://%s", rule.Label, rule.Listen.Scheme, rule.Listen.Addr)
-		if rule.Listen.Target != "" {
-			log.Printf("[rule %s] forward target: %s", rule.Label, rule.Listen.Target)
-		}
-		logForwardChain(rule)
+		log.Printf("[rule %s] %s", rule.Label, routeString(rule))
 	}
 	logIdleTimeout(cfg.Timeout)
 }
 
-// logForwardChain prints the hop order once at startup, because "nearest hop
-// first" is easy to get backwards on the command line. Credentials are never
-// logged.
-func logForwardChain(rule config.Rule) {
-	if len(rule.Upstream) == 0 {
-		return
-	}
-
-	hops := make([]string, 0, len(rule.Upstream))
+// routeString renders one rule as a data-flow path: the local listener first,
+// each upstream hop in dial order, then the final target. The arrows follow the
+// data, so "nearest hop first" cannot be read backwards. Proxies pick their
+// target from each request; only the forwarding modes have a fixed one.
+// Credentials are never logged.
+func routeString(rule config.Rule) string {
+	var b strings.Builder
+	b.WriteString("listen " + endpointString(rule.Listen))
 	for i, hop := range rule.Upstream {
-		hops = append(hops, fmt.Sprintf("[%d] %s://%s", i, hop.Scheme, hop.Addr))
+		fmt.Fprintf(&b, " -> [%d] %s", i+1, endpointString(hop))
 	}
-	log.Printf("[rule %s] forward chain: %s -> target", rule.Label, strings.Join(hops, " -> "))
+	b.WriteString(" -> target")
+	if rule.Listen.Target != "" {
+		b.WriteString(" " + rule.Listen.Target)
+	} else {
+		b.WriteString(" (from request)")
+	}
+	return b.String()
+}
+
+// endpointString renders scheme://addr and marks an endpoint that
+// authenticates without revealing its username or password.
+func endpointString(endpoint config.Endpoint) string {
+	rendered := endpoint.Scheme + "://" + endpoint.Addr
+	if endpoint.Auth != nil {
+		rendered += " (auth)"
+	}
+	return rendered
 }
 
 // logIdleTimeout prints the effective tunnel idle timeout so the running
